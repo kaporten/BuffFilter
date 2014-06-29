@@ -222,28 +222,17 @@ function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBen
 	if bHide == true then
 		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = true
 	end	
+	
+	-- Add buff to Settings window grid
+	local grid = self.wndSettings:FindChild("Grid")
+	local row = grid:AddRow("", "", tBuffDetails)
+	grid:SetCellImage(row, 1, tBuffDetails.strIcon)
+	grid:SetCellText(row, 2, tBuffDetails.strName)
+	
+	--BuffFilter:ToggleGridRow(row, tBuffDetails.bHide)
 end
 
 function BuffFilter:OnConfigure()
-	table.sort(self.tBuffsById, 
-		function(a, b)
-			if a.bHide == true and b.bHide == false then return true end
-			if a.bFailed == false and b.bFailed == true then return false end
-			return a.strName < b.strName
-		end
-	)
-	
-	for _,b in ipairs(self.tBuffsById) do
-		-- Add buff to the Settings window
-		local wndBuffLine = Apollo.LoadForm(self.xmlDoc, "BuffLineForm", BuffFilter.wndSettings:FindChild("BuffLineArea"), self)
-		wndBuffLine:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)
-		wndBuffLine:FindChild("BuffName"):SetText(tBuffDetails.strName)
-		wndBuffLine:FindChild("HideButton"):SetData(tBuffDetails)
-		wndBuffLine:FindChild("HideButton"):SetCheck(tBuffDetails.bHide)
-		wndBuffLine:Show(true, false)
-	end
-		
-	BuffFilter.wndSettings:FindChild("BuffLineArea"):ArrangeChildrenVert()
 	self.wndSettings:Show(true, false)	
 end
 
@@ -255,7 +244,8 @@ end
 
 function BuffFilter:OnHideButtonChange(wndHandler, wndControl)	
 	log:debug("OnHideButtonChange")
-	local tBuffDetails = wndControl:GetData()	
+	
+	local tBuffDetails = wndControl:GetCurrentRow()GetData()	
 	local bHide = wndControl:IsChecked()
 		
 	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
@@ -280,3 +270,26 @@ function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOl
 	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
 end
 
+function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
+	log:debug("OnGridSelChange")
+	--local tBuffDetails = wndControl:GetData()
+	--tBuffDetails.bHide = not tBuffDetails.bHide
+	BuffFilter:ToggleGridRow(nRow)
+end
+
+function BuffFilter:ToggleGridRow(nRow)	
+	local grid = self.wndSettings:FindChild("Grid")	
+	local tBuffDetails = grid:GetCellData(nRow, 1)
+	
+	log:debug("Toggling buff '%s', %s --> %s", tBuffDetails.strName, tostring(tBuffDetails.bHide), tostring(not tBuffDetails.bHide))
+	tBuffDetails.bHide = not tBuffDetails.bHide
+	
+	if tBuffDetails.bHide == true then
+		grid:SetCellImage(nRow, 3, "achievements:sprAchievements_Icon_Complete")
+		grid:SetCellSortText(nRow, 3, "1")
+	else
+		grid:SetCellImage(nRow, 3, "")
+		grid:SetCellSortText(nRow, 3, "0")
+	end
+	
+end
