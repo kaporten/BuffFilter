@@ -87,19 +87,19 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	log:debug("BuffFilter timer")
+	--log:debug("BuffFilter timer")
 	
 	local activeBuffs = GameLib.GetPlayerUnit():GetBuffs()
 	local tHideBene = BuffFilter:ScanBuffs(activeBuffs.arBeneficial)
 	
 	if #tHideBene > 0 then
-		log:debug("Hiding %d buffs", #tHideBene)
+		--log:debug("Hiding %d buffs", #tHideBene)
 		BuffFilter:FilterBuffs(tHideBene)
 	end
 end
 
 function BuffFilter:ScanBuffs(tActiveBuffs)
-	log:debug("Scanning buff list")
+	--log:debug("Scanning buff list")
 	if tActiveBuffs == nil then return {} end
 	
 	local tHide = {}
@@ -113,14 +113,14 @@ function BuffFilter:ScanBuffs(tActiveBuffs)
 		if conf ~= nil and conf.Show == false then
 			-- Buff to hide identified, add to TODO list
 			tHide[#tHide+1] = conf		
-			log:debug("Active buff '%s' configured hiding", conf.Name)
+			--log:debug("Active buff '%s' configured hiding", conf.Name)
 		end
 	end
 	return tHide
 end
 
 function BuffFilter:ConstructSettings(splEffect, strTooltip)	
-	log:debug("New buff registered: '%s', tooltip: '%s'", splEffect:GetName(), strTooltip)
+	--log:debug("New buff registered: '%s', tooltip: '%s'", splEffect:GetName(), strTooltip)
 	return {
 		BaseSpellId = splEffect:GetBaseSpellId(),
 		Name = splEffect:GetName(),		
@@ -134,10 +134,10 @@ end
 
 function BuffFilter:GetPlayerBeneBuffBar()
 	if self.playerBeneBuffBar ~= nil then
-		log:debug("Reference to Player BeneBuffBar already found, returning that")
+		--log:debug("Reference to Player BeneBuffBar already found, returning that")
 		return self.playerBeneBuffBar
 	else
-		log:debug("Searching for reference to Player BeneBuffBar")
+		--log:debug("Searching for reference to Player BeneBuffBar")
 		
 		-- Safely dig into the GUI elements
 		local addonTargetFrame = Apollo.GetAddon("TargetFrame")
@@ -159,13 +159,13 @@ function BuffFilter:GetPlayerBeneBuffBar()
 end
 
 function BuffFilter:FilterBuffs(tHide)
-	log:debug("Filtering buffs")
+	--log:debug("Filtering buffs")
 	local playerBeneBuffBar = self:GetPlayerBeneBuffBar()
 	self:FilterBuffsOnBar(playerBeneBuffBar, tHide)
 end
 
 function BuffFilter:FilterBuffsOnBar(wndBuffBar, tToHide)
-	log:debug("Filtering buffs on Bar")
+	--log:debug("Filtering buffs on Bar")
 	-- Get buff child windows on bar
 	local wndCurrentBuffs = wndBuffBar:GetChildren()
 	
@@ -178,14 +178,12 @@ function BuffFilter:FilterBuffsOnBar(wndBuffBar, tToHide)
 			
 			if wndCurrentBuff:GetBuffTooltip() == strHideTooltip then
 				
-				log:debug("Hiding buff '%s'", b.Name)
+				--log:debug("Hiding buff '%s'", b.Name)
 				wndCurrentBuff:Show(false)
 			end		
 		end
 	end
 end
-
-
 
 -- Save addon config per character. Called by engine when performing a controlled game shutdown.
 function BuffFilter:OnSave(eType)
@@ -210,24 +208,4 @@ function BuffFilter:OnRestore(eType, tSavedData)
 	self.tSettings = tSavedData
 end
 
----------------------------------------------------------------------------------------------------
--- SettingsForm Functions
----------------------------------------------------------------------------------------------------
-
-function BuffFilter:OnGenerateBuffTooltip(wndHandler, wndControl, tType, splBuff)
-	log:debug("OnGenerateBuffTooltip")
-	if wndHandler == wndControl then
-		return
-	end
-	Tooltip.GetBuffTooltipForm(self, wndControl, splBuff, {bFutureSpell = false})
-end
-
-
-function BuffFilter:OnUDE( wndHandler, wndControl )
-	log:debug("OnUDE")
-end
-
-function BuffFilter:OnWindowLoad( wndHandler, wndControl )
-	log:debug("OnWindowLoad")
-end
 
