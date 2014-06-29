@@ -1,6 +1,6 @@
 require "Window"
 
-local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true)
+local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"TargetFrame"})
 BuffFilter.ADDON_VERSION = {0, 7, 0}
 
 local log
@@ -14,6 +14,7 @@ end
 function BuffFilter:OnEnable()	
 	-- GeminiLogger options
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
+	--[[
 	log = GeminiLogging:GetLogger({
 		level = GeminiLogging.FATAL,
 		pattern = "%d %n %c %l - %m",
@@ -21,7 +22,8 @@ function BuffFilter:OnEnable()
 	})
 	
 	self.log = log -- store ref for GeminiConsole-access to loglevel
-	log:info("Initializing addon 'BuffFilter'")
+	]]
+	--log:info("Initializing addon 'BuffFilter'")
 
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
@@ -42,7 +44,7 @@ function BuffFilter:OnDocLoaded()
 		
 	-- Restore saved data
 	if self.tSavedData ~= nil and type(self.tSavedData) == "table" then
-		log:info("Loading saved configuration")
+		--log:info("Loading saved configuration")
 		
 		-- Register buffs from savedata
 		if type(self.tSavedData.tKnownBuffs) == "table" then
@@ -69,7 +71,7 @@ function BuffFilter:OnDocLoaded()
 		-- Clear saved data object
 		self.tSavedData = nil
 	else
-		log:info("No saved config found. First run?")
+		--log:info("No saved config found. First run?")
 	end
 			
 	-- Fire scanner once and start timer
@@ -191,7 +193,7 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		return
 	end
 	
-	log:info("Registering buff: '%s'", strName)
+	--log:info("Registering buff: '%s'", strName)
 	
 	-- Construct buff details table
 	local tBuffDetails =  {
@@ -256,7 +258,7 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 			
 		-- Check if this buff has same tooltip
 		if tRowBuffDetails.strTooltip == strTooltip then
-			log:info("Toggling buff '%s', %s --> %s", tRowBuffDetails.strName, tostring(tRowBuffDetails.bHide), tostring(bUpdatedHide))
+			--log:info("Toggling buff '%s', %s --> %s", tRowBuffDetails.strName, tostring(tRowBuffDetails.bHide), tostring(bUpdatedHide))
 			tRowBuffDetails.bHide = bUpdatedHide
 			self:SetGridRowStatus(r, bUpdatedHide)				
 		end
