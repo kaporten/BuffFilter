@@ -26,9 +26,9 @@ function BuffFilter:OnEnable()
 		self.tSettings.tBuffs = {}
 		log:info("No saved settings, first time load?")
 	end
-	
-	self:HookBuffTooltipGeneration()
-	
+
+	-- Hook into the tooltip generation framework
+	self:HookBuffTooltipGeneration()	
 end
 
 function BuffFilter:OnDocLoaded()
@@ -39,17 +39,10 @@ function BuffFilter:OnDocLoaded()
 			Apollo.AddAddonErrorText(self, "Could not load the Settings form.")
 			return
 		end		
-	    self.wndSettings:Show(true, true)
-		
+	    self.wndSettings:Show(false, true)
 		self.xmlDoc = nil
-		
-		for idx = 1, 8 do
-			self.wndSettings:FindChild("BuffContainerWindow"):SetUnit(GameLib.GetPlayerUnit())
-			self.wndSettings:FindChild("BuffContainerWindow"):SetUnit(GameLib.GetPlayerUnit())
-		end		
 	end
-	
-	
+		
 	-- Start timer for buff scanning
 	self.scanTimer = ApolloTimer.Create(3, true, "OnTimer", self)
 end
@@ -65,20 +58,18 @@ function BuffFilter:HookBuffTooltipGeneration()
 		-- First, call the orignal function to create the original callbacks
 		origCreateCallNames(luaCaller)
 		
-		-- Save the original function
+		-- Then, override GetBuffTooltipForm with own function
 		origGetBuffTooltipForm = Tooltip.GetBuffTooltipForm
-		
-		-- Now create a new callback function for the item form
 		Tooltip.GetBuffTooltipForm = function(luaCaller, wndParent, splSource, tFlags)			
-			-- Pass control to original tooltip generation function
+			-- Let original function produce tooltip window
 			local wndTooltip = origGetBuffTooltipForm(luaCaller, wndParent, splSource, tFlags)
 			 
-			-- Register relevant info in BuffFilter addon
+			-- Extract info required to combine spellid + tooltip string
 			local tBuffs = self.tSettings.tBuffs
 			local splId = splSource:GetBaseSpellId()
 			local conf = tBuffs[splId]
 				
-			-- First time this buff is seen
+			-- First time this buff is seen?
 			if conf == nil then
 				-- NB: At this point in time, wndParent actually targets the icon-to-hide. 
 				-- But using this ref would mean relying on the user to mouse-over the tooltip 
@@ -94,29 +85,38 @@ function BuffFilter:HookBuffTooltipGeneration()
 	end	
 end
 
-
+-- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	--log:debug("BuffFilter timer")
+	log:debug("BuffFilter timer")
 	
 	local activeBuffs = GameLib.GetPlayerUnit():GetBuffs()
-	local tBuffs = self.tSettings.tBuffs
-	local tToHide = {}
+	local tHideBene = BuffFilter:ScanBuffs(activeBuffs.arBeneficial)
 	
-	-- For each buff, check if we have known config
-	for _,b in ipairs(activeBuffs.arBeneficial) do
-		local splId = b.splEffect:GetBaseSpellId()
-		local conf = tBuffs[splId]
+	if #tHideBene > 0 then
+		log:debug("Hiding %d buffs", #tHideBene)
+		BuffFilter:FilterBuffs(tHideBene)
+	end
+end
+
+function BuffFilter:ScanBuffs(tActiveBuffs)
+	log:debug("Scanning buff list")
+	if tActiveBuffs == nil then return {} end
+	
+	local tHide = {}
+	local tBuffConfigs = self.tSettings.tBuffs
+	
+	-- For each active buff, check if we have a known config indicating that it should be hidden
+	for _,splActiveBuff in ipairs(tActiveBuffs) do
+		local splId = splActiveBuff.splEffect:GetBaseSpellId()
+		local conf = tBuffConfigs[splId]
 		
 		if conf ~= nil and conf.Show == false then
 			-- Buff to hide identified, add to TODO list
-			tToHide[#tToHide+1] = conf		
-			log:debug("Marking buff '%s' for hiding", conf.Name)
+			tHide[#tHide+1] = conf		
+			log:debug("Active buff '%s' configured hiding", conf.Name)
 		end
 	end
-	
-	if #tToHide > 1 then
-		BuffFilter:Hide(tToHide)
-	end
+	return tHide
 end
 
 function BuffFilter:ConstructSettings(splEffect, strTooltip)	
@@ -131,15 +131,14 @@ function BuffFilter:ConstructSettings(splEffect, strTooltip)
 	}
 end
 
-function BuffFilter:Hide(tToHide)
-	local playerBeneBuffBar = self:GetPlayerBeneBuffBar()
-	self:FilterBuffsOnBar(playerBeneBuffBar, tToHide)
-end
 
 function BuffFilter:GetPlayerBeneBuffBar()
 	if self.playerBeneBuffBar ~= nil then
+		log:debug("Reference to Player BeneBuffBar already found, returning that")
 		return self.playerBeneBuffBar
 	else
+		log:debug("Searching for reference to Player BeneBuffBar")
+		
 		-- Safely dig into the GUI elements
 		local addonTargetFrame = Apollo.GetAddon("TargetFrame")
 		if addonTargetFrame == nil then return end
@@ -159,19 +158,30 @@ function BuffFilter:GetPlayerBeneBuffBar()
 	end
 end
 
+function BuffFilter:FilterBuffs(tHide)
+	log:debug("Filtering buffs")
+	local playerBeneBuffBar = self:GetPlayerBeneBuffBar()
+	self:FilterBuffsOnBar(playerBeneBuffBar, tHide)
+end
+
 function BuffFilter:FilterBuffsOnBar(wndBuffBar, tToHide)
-	log:debug("FilterbuffsOnBar")
+	log:debug("Filtering buffs on Bar")
 	-- Get buff child windows on bar
 	local wndCurrentBuffs = wndBuffBar:GetChildren()
+	
 	if wndCurrentBuffs == nil then return end	
 			
 	-- Buffs found, loop over them all, hide ones on todo list
 	for _,wndCurrentBuff in ipairs(wndCurrentBuffs) do
-		if wndCurrentBuff:GetBuffTooltip() == tToHide.Tooltip then
+		for _,b in ipairs(tToHide) do
+			local strHideTooltip = b.Tooltip
 			
-			log:debug("Hiding buff '%s'", tToHide.Name)
-			wndCurrentBuff:Show(false)
-		end		
+			if wndCurrentBuff:GetBuffTooltip() == strHideTooltip then
+				
+				log:debug("Hiding buff '%s'", b.Name)
+				wndCurrentBuff:Show(false)
+			end		
+		end
 	end
 end
 
