@@ -40,7 +40,7 @@ function BuffFilter:OnDocLoaded()
 			return
 		end		
 	    self.wndSettings:Show(false, true)
-		--self.xmlDoc = nil -- Keep in mem for spawning child forms
+		self.xmlDoc = nil
 	end
 		
 	-- Set interval timer to saved value
@@ -60,9 +60,10 @@ function BuffFilter:OnDocLoaded()
 			end			
 		end
 		
-		-- Load interval timer setting
-		if type(self.tSavedData.timer) == "number" then
-			--self.wndSettings:FindChild("SliderBar")
+		-- Load interval timer setting			
+		if type(self.tSavedData.nTimer) == "number" then
+			self.wndSettings:FindChild("Slider"):SetValue(self.tSavedData.nTimer)
+			self.wndSettings:FindChild("SliderValue"):SetText(tostring(self.tSavedData.nTimer))
 		end
 		
 		self.tSavedData = nil
@@ -172,6 +173,7 @@ function BuffFilter:OnSave(eType)
 	local tSaveData = {}
 	tSaveData.addonVersion = self.ADDON_VERSION
 	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
+	tSaveData.nTimer = self.wndSettings:FindChild("Slider"):GetValue()
 	return tSaveData	
 end
 
@@ -225,11 +227,11 @@ function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBen
 	
 	-- Add buff to Settings window grid
 	local grid = self.wndSettings:FindChild("Grid")
-	local row = grid:AddRow("", "", tBuffDetails)
-	grid:SetCellImage(row, 1, tBuffDetails.strIcon)
-	grid:SetCellText(row, 2, tBuffDetails.strName)
+	local nRow = grid:AddRow("", "", tBuffDetails)
+	grid:SetCellImage(nRow, 1, tBuffDetails.strIcon)
+	grid:SetCellText(nRow, 2, tBuffDetails.strName)
 	
-	--BuffFilter:ToggleGridRow(row, tBuffDetails.bHide)
+	BuffFilter:SetGridRowStatus(nRow, tBuffDetails.bHide)
 end
 
 function BuffFilter:OnConfigure()
@@ -265,31 +267,41 @@ end
 -- SettingsForm Functions
 ---------------------------------------------------------------------------------------------------
 function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
-	self.wndSettings:FindChild("ScanIntervalLabel"):SetText(tostring(fNewValue))
+	self.wndSettings:FindChild("SliderValue"):SetText(tostring(fNewValue))
 	self.scanTimer:Stop()
 	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
 end
 
 function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
-	log:debug("OnGridSelChange")
-	--local tBuffDetails = wndControl:GetData()
-	--tBuffDetails.bHide = not tBuffDetails.bHide
-	BuffFilter:ToggleGridRow(nRow)
-end
-
-function BuffFilter:ToggleGridRow(nRow)	
 	local grid = self.wndSettings:FindChild("Grid")	
 	local tBuffDetails = grid:GetCellData(nRow, 1)
 	
 	log:debug("Toggling buff '%s', %s --> %s", tBuffDetails.strName, tostring(tBuffDetails.bHide), tostring(not tBuffDetails.bHide))
 	tBuffDetails.bHide = not tBuffDetails.bHide
 	
-	if tBuffDetails.bHide == true then
+	self:SetGridRowStatus(nRow, tBuffDetails.bHide)	
+	
+	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
+	for _,b in ipairs(BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip]) do
+		b.bHide = tBuffDetails.bHide
+	end
+	
+	-- Also update the by-tooltip summary table 
+	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = tBuffDetails.bHide
+	
+	-- Force update
+	BuffFilter:OnTimer()
+end
+
+
+function BuffFilter:SetGridRowStatus(nRow, bHide)
+	local grid = self.wndSettings:FindChild("Grid")	
+
+	if bHide == true then
 		grid:SetCellImage(nRow, 3, "achievements:sprAchievements_Icon_Complete")
 		grid:SetCellSortText(nRow, 3, "1")
 	else
 		grid:SetCellImage(nRow, 3, "")
 		grid:SetCellSortText(nRow, 3, "0")
-	end
-	
+	end	
 end
