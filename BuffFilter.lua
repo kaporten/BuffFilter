@@ -1,7 +1,7 @@
 require "Window"
 
-local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", false)
-BuffFilter.ADDON_VERSION = {0, 1, 0}
+local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", "Buff Filter")
+BuffFilter.ADDON_VERSION = {0, 2, 0}
 
 local log
 
@@ -16,6 +16,7 @@ function BuffFilter:OnEnable()
 	
 	self.log = log -- store ref for GeminiConsole-access to loglevel
 	log:info("Initializing addon 'BuffFilter'")
+	
 	
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
 	self.xmlDoc:RegisterCallback("OnDocLoaded", self)
@@ -40,7 +41,7 @@ function BuffFilter:OnDocLoaded()
 			return
 		end		
 	    self.wndSettings:Show(false, true)
-		self.xmlDoc = nil
+		--self.xmlDoc = nil -- Keep in mem for spawning child forms
 	end
 		
 	-- Start timer for buff scanning
@@ -64,20 +65,17 @@ function BuffFilter:HookBuffTooltipGeneration()
 			-- Let original function produce tooltip window
 			local wndTooltip = origGetBuffTooltipForm(luaCaller, wndParent, splSource, tFlags)
 			 
-			-- Extract info required to combine spellid + tooltip string
-			local tBuffs = self.tSettings.tBuffs
-			local splId = splSource:GetBaseSpellId()
-			local conf = tBuffs[splId]
-				
-			-- First time this buff is seen?
-			if conf == nil then
-				-- NB: At this point in time, wndParent actually targets the icon-to-hide. 
-				-- But using this ref would mean relying on the user to mouse-over the tooltip 
-				-- every time it should be hidden. So, better to re-scan and tooltip-match later.
-				local strTooltip = wndParent:GetBuffTooltip()
-				conf = BuffFilter:ConstructSettings(splSource, strTooltip)
-				tBuffs[splId] = conf
-			end
+			-- Learn the buff.
+			-- NB: At this point in time, wndParent actually targets the icon-to-hide. 
+			-- But using this ref would mean relying on the user to mouse-over the tooltip 
+			-- every time it should be hidden. So, better to re-scan and tooltip-match later.
+			BuffFilter:LearnBuff(
+				splSource:GetBaseSpellId(),
+				splSource:GetName(),	
+				wndParent:GetBuffTooltip(),
+				splSource:GetIcon(),		
+				splSource:IsBeneficial(),
+				true)
 
 			-- Return generated tooltip to client addon
 			return wndTooltip
@@ -117,18 +115,6 @@ function BuffFilter:ScanBuffs(tActiveBuffs)
 		end
 	end
 	return tHide
-end
-
-function BuffFilter:ConstructSettings(splEffect, strTooltip)	
-	--log:debug("New buff registered: '%s', tooltip: '%s'", splEffect:GetName(), strTooltip)
-	return {
-		BaseSpellId = splEffect:GetBaseSpellId(),
-		Name = splEffect:GetName(),		
-		Icon = splEffect:GetIcon(),		
-		IsBeneficial = splEffect:IsBeneficial(),
-		Tooltip = strTooltip,
-		Show = true,		
-	}
 end
 
 
@@ -192,10 +178,10 @@ function BuffFilter:OnSave(eType)
 	end
 	
 	-- Add current addon version to settings, for future compatibility/load checks
-	self.tSettings.addonVersion = self.ADDON_VERSION
-	
-	-- Simply save the entire tSettings structure
-	return self.tSettings
+	local tSaveData = {}
+	tSaveData.addonVersion = self.ADDON_VERSION
+	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
+	return tSaveData	
 end
 
 -- Restore addon config per character. Called by engine when loading UI.
@@ -204,8 +190,79 @@ function BuffFilter:OnRestore(eType, tSavedData)
 		return 
 	end
 	
-	-- Store saved settings directly on self
-	self.tSettings = tSavedData
+	-- "learn" buffs from savedata
+	if tSavedData ~= nil and type(tSavedData) == "table" and type(tSavedData.tKnownBuffs) == "table" then
+		for _,b in ipairs(tSavedData.tKnownBuffs) do
+			BuffFilter:LearnBuff(
+				b.nBaseSpellId,
+				b.strName,		
+				b.strTooltip,
+				b.strIcon,		
+				b.bIsBeneficial,
+				b.bShow
+			)
+		end
+	end
+end
+
+-- Learn buffs either by reading from addon savedata file, or from tooltip mouseovers
+function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bShow)	
+	if BuffFilter.tBuffsById == nil then self.tBuffsById = {} end
+	if BuffFilter.tBuffsByTooltip == nil then self.tBuffsByTooltip = {} end
+
+	-- Assume the two buff tables are in sync, and just check for presence in the first
+	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
+		-- Buff already known, do nothing
+		return
+	end
+	
+	log:debug("New buff registered: '%s', tooltip: '%s'", strName, strTooltip)
+	
+	-- Construct buff details table
+	local tBuffDetails =  {
+		nBaseSpellId = nBaseSpellId,
+		strName = strName,		
+		strTooltip = strTooltip,
+		strIcon = strIcon,		
+		bIsBeneficial = bIsBeneficial,
+		bShow = bShow
+	}
+	
+	-- Add to byId table
+	BuffFilter.tBuffsById[tBuffDetails.nBaseSpellId] = tBuffDetails
+	
+	-- Add to byTooltip table (multiple buffs per tooltip possible)
+	if BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip] == nil then
+		BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip] = {}
+	end
+	BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip][#BuffFilter.tBuffsByTooltip+1] = tBuffDetails
+	
+	-- Add buff to the Settings window
+	local wndBuffLine = Apollo.LoadForm(self.xmlDoc, "BuffLineForm", BuffFilter.wndSettings:FindChild("BuffLineArea"), self)
+	wndBuffLine:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)
+	wndBuffLine:FindChild("BuffName"):SetText(tBuffDetails.strName)
+	wndBuffLine:SetData(tBuffDetails)
+	wndBuffLine:Show(true, false)
+	
+	BuffFilter.wndSettings:FindChild("BuffLineArea"):ArrangeChildrenVert()
+end
+
+function BuffFilter:OnConfigure()
+	log:debug("OnConfigure")
+	self.wndSettings:Show(true, false)
 end
 
 
+function BuffFilter:OnAcceptSettings()
+	self.wndSettings:Show(false, true)
+end
+
+function BuffFilter:OnCancelSettings()
+	self.wndSettings:Show(false, true)
+end
+---------------------------------------------------------------------------------------------------
+-- BuffLineForm Functions
+---------------------------------------------------------------------------------------------------
+function BuffFilter:OnHideButtonSignal(wndHandler, wndControl)
+	log:debug("OnHideButtonSignal")
+end
