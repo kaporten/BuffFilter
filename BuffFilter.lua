@@ -1,7 +1,7 @@
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"TargetFrame"})
-BuffFilter.ADDON_VERSION = {0, 7, 0}
+BuffFilter.ADDON_VERSION = {0, 7, 1}
 
 local log
 
