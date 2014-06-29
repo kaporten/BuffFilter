@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"TargetFrame", "ToolTips"})
-BuffFilter.ADDON_VERSION = {0, 7, 2}
+BuffFilter.ADDON_VERSION = {0, 7, 3}
 
 local log
 
@@ -14,8 +14,7 @@ function BuffFilter:OnInitialize()
 end
 
 function BuffFilter:OnEnable()	
-	-- GeminiLogger options
-	---[[
+	-- GeminiLogger options	
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
@@ -114,17 +113,17 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	log:debug("BuffFilter timer")
+	--log:debug("BuffFilter timer")
 	BuffFilter:FilterBuffsOnBar(BuffFilter:GetPlayerBeneBuffBar())
 end
 
 
 function BuffFilter:GetPlayerBeneBuffBar()
 	if self.playerBeneBuffBar ~= nil then
-		log:debug("Reference to Player BeneBuffBar already found, returning that")
+		--log:debug("Reference to Player BeneBuffBar already found, returning that")
 		return self.playerBeneBuffBar
 	else
-		log:debug("Searching for reference to Player BeneBuffBar")
+		--log:debug("Searching for reference to Player BeneBuffBar")
 		
 		-- Safely dig into the GUI elements
 		local addonTargetFrame = Apollo.GetAddon("TargetFrame")
@@ -146,7 +145,7 @@ function BuffFilter:GetPlayerBeneBuffBar()
 end
 
 function BuffFilter:FilterBuffsOnBar(wndBuffBar)
-	log:debug("Filtering buffs on Bar")
+	--log:debug("Filtering buffs on Bar")
 	-- Get buff child windows on bar
 	local wndCurrentBuffs = wndBuffBar:GetChildren()
 	
@@ -188,7 +187,7 @@ end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
 function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)	
-	log:debug("RegisterBuff called")
+	--log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
 		-- Buff already known, do nothing
@@ -248,11 +247,8 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	local tBuffDetails = grid:GetCellData(nRow, 1)
 	local bUpdatedHide = not tBuffDetails.bHide
 	
-	log:info("Toggling buff '%s', %s --> %s", tBuffDetails.strName, tostring(tBuffDetails.bHide), tostring(bUpdatedHide))
-	
 	local strTooltip = tBuffDetails.strTooltip
 	
-		
 	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
 	for r = 1, grid:GetRowCount() do -- for every row on the grid
 		-- Get buff for this row
