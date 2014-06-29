@@ -43,27 +43,39 @@ function BuffFilter:OnDocLoaded()
 		--self.xmlDoc = nil -- Keep in mem for spawning child forms
 	end
 		
-	-- "learn" buffs from savedata
-	if self.tSavedData ~= nil and type(self.tSavedData) == "table" and type(self.tSavedData.tKnownBuffs) == "table" then
-		log:info("Loading saved buff config")
-		for _,b in pairs(self.tSavedData.tKnownBuffs) do		
-			BuffFilter:LearnBuff(
-				b.nBaseSpellId,
-				b.strName,		
-				b.strTooltip,
-				b.strIcon,		
-				b.bIsBeneficial,
-				b.bHide
-			)
+	-- Set interval timer to saved value
+	if self.tSavedData ~= nil and type(self.tSavedData) == "table" then
+		-- "learn" buffs from savedata
+		if type(self.tSavedData.tKnownBuffs) == "table" then
+			log:info("Loading saved buff config")
+			for _,b in pairs(self.tSavedData.tKnownBuffs) do		
+				BuffFilter:LearnBuff(
+					b.nBaseSpellId,
+					b.strName,		
+					b.strTooltip,
+					b.strIcon,		
+					b.bIsBeneficial,
+					b.bHide
+				)
+			end			
 		end
+		
+		-- Load interval timer setting
+		if type(self.tSavedData.timer) == "number" then
+			--self.wndSettings:FindChild("SliderBar")
+		end
+		
 		self.tSavedData = nil
 	else
-		log:info("No saved buff config found. First run?")
+		log:info("No saved config found. First run?")
 	end
 			
 	-- Fire once and start timer for buff scanning
 	BuffFilter:OnTimer()
 	self.scanTimer = ApolloTimer.Create(3, true, "OnTimer", self)
+	
+	-- TODO: showing settings is only for dev, not prod
+	self.wndSettings:Show(true, true)
 end
 
 -- Used to combine SpellID with the tooltip
@@ -133,8 +145,6 @@ function BuffFilter:GetPlayerBeneBuffBar()
 		return wndBeneBuffBar
 	end
 end
-
-
 
 function BuffFilter:FilterBuffsOnBar(wndBuffBar)
 	log:debug("Filtering buffs on Bar")
@@ -211,31 +221,34 @@ function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBen
 	end
 	if bHide == true then
 		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = true
-	end
-
-	
-	
-	-- Add buff to the Settings window
-	local wndBuffLine = Apollo.LoadForm(self.xmlDoc, "BuffLineForm", BuffFilter.wndSettings:FindChild("BuffLineArea"), self)
-	wndBuffLine:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)
-	wndBuffLine:FindChild("BuffName"):SetText(tBuffDetails.strName)
-	wndBuffLine:FindChild("HideButton"):SetData(tBuffDetails)
-	wndBuffLine:Show(true, false)
-	
-	BuffFilter.wndSettings:FindChild("BuffLineArea"):ArrangeChildrenVert()
+	end	
 end
 
 function BuffFilter:OnConfigure()
-	log:debug("OnConfigure")
-	self.wndSettings:Show(true, false)
+	table.sort(self.tBuffsById, 
+		function(a, b)
+			if a.bHide == true and b.bHide == false then return true end
+			if a.bFailed == false and b.bFailed == true then return false end
+			return a.strName < b.strName
+		end
+	)
+	
+	for _,b in ipairs(self.tBuffsById) do
+		-- Add buff to the Settings window
+		local wndBuffLine = Apollo.LoadForm(self.xmlDoc, "BuffLineForm", BuffFilter.wndSettings:FindChild("BuffLineArea"), self)
+		wndBuffLine:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)
+		wndBuffLine:FindChild("BuffName"):SetText(tBuffDetails.strName)
+		wndBuffLine:FindChild("HideButton"):SetData(tBuffDetails)
+		wndBuffLine:FindChild("HideButton"):SetCheck(tBuffDetails.bHide)
+		wndBuffLine:Show(true, false)
+	end
+		
+	BuffFilter.wndSettings:FindChild("BuffLineArea"):ArrangeChildrenVert()
+	self.wndSettings:Show(true, false)	
 end
 
 
-function BuffFilter:OnAcceptSettings()
-	self.wndSettings:Show(false, true)
-end
-
-function BuffFilter:OnCancelSettings()
+function BuffFilter:OnHideSettings()
 	self.wndSettings:Show(false, true)
 end
 
@@ -255,5 +268,15 @@ function BuffFilter:OnHideButtonChange(wndHandler, wndControl)
 	
 	-- Force update
 	BuffFilter:OnTimer()
+end
+
+
+---------------------------------------------------------------------------------------------------
+-- SettingsForm Functions
+---------------------------------------------------------------------------------------------------
+function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
+	self.wndSettings:FindChild("ScanIntervalLabel"):SetText(tostring(fNewValue))
+	self.scanTimer:Stop()
+	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
 end
 
