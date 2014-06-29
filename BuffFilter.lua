@@ -15,7 +15,7 @@ function BuffFilter:OnEnable()
 	-- GeminiLogger options
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.DEBUG,
+		level = GeminiLogging.FATAL,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -78,9 +78,8 @@ function BuffFilter:OnDocLoaded()
 	
 	-- Hook into tooltip generation
 	BuffFilter:HookBuffTooltipGeneration()
-	
-	-- TODO: showing settings is only for dev, not prod
-	self.wndSettings:Show(true, true)	
+		
+	--self.wndSettings:Show(true, true)	
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -111,7 +110,7 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	log:debug("BuffFilter timer")
+	--log:debug("BuffFilter timer")
 	BuffFilter:FilterBuffsOnBar(BuffFilter:GetPlayerBeneBuffBar())
 end
 
@@ -143,7 +142,7 @@ function BuffFilter:GetPlayerBeneBuffBar()
 end
 
 function BuffFilter:FilterBuffsOnBar(wndBuffBar)
-	log:debug("Filtering buffs on Bar")
+	--log:debug("Filtering buffs on Bar")
 	-- Get buff child windows on bar
 	local wndCurrentBuffs = wndBuffBar:GetChildren()
 	
@@ -257,11 +256,10 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 			
 		-- Check if this buff has same tooltip
 		if tRowBuffDetails.strTooltip == strTooltip then
+			log:info("Toggling buff '%s', %s --> %s", tRowBuffDetails.strName, tostring(tRowBuffDetails.bHide), tostring(bUpdatedHide))
 			tRowBuffDetails.bHide = bUpdatedHide
-			self:SetGridRowStatus(r, bUpdatedHide)	
-			log:info("Toggling buff '%s', %s --> %s", tBuffDetails.strName, tostring(tBuffDetails.bHide), tostring(bUpdatedHide))
+			self:SetGridRowStatus(r, bUpdatedHide)				
 		end
-
 	end
 	
 	-- Also update the by-tooltip summary table to latest value
@@ -283,8 +281,3 @@ function BuffFilter:SetGridRowStatus(nRow, bHide)
 		grid:SetCellSortText(nRow, 3, "0")
 	end	
 end
-
-function BuffFilter:OnWindowKeyDown( wndHandler, wndControl, strKeyName, nScanCode, nMetakeys )
-	log:debug("OnWindowKeyDown")
-end
-
