@@ -1,13 +1,13 @@
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true)
-BuffFilter.ADDON_VERSION = {0, 2, 0}
+BuffFilter.ADDON_VERSION = {0, 7, 0}
 
 local log
 
 function BuffFilter:OnInitialize()
+	-- Tables for criss-cross references of buffs & tooltips
 	self.tBuffsById = self.tBuffsById or {}
-	self.tBuffsByTooltip = self.tBuffsByTooltip or {}
 	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
 end
 
@@ -22,13 +22,10 @@ function BuffFilter:OnEnable()
 	
 	self.log = log -- store ref for GeminiConsole-access to loglevel
 	log:info("Initializing addon 'BuffFilter'")
-	
+
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
 	self.xmlDoc:RegisterCallback("OnDocLoaded", self)
-
-	-- Hook into the tooltip generation framework
-	self:HookBuffTooltipGeneration()	
 end
 
 function BuffFilter:OnDocLoaded()
@@ -43,13 +40,14 @@ function BuffFilter:OnDocLoaded()
 		self.xmlDoc = nil
 	end
 		
-	-- Set interval timer to saved value
+	-- Restore saved data
 	if self.tSavedData ~= nil and type(self.tSavedData) == "table" then
-		-- "learn" buffs from savedata
+		log:info("Loading saved configuration")
+		
+		-- Register buffs from savedata
 		if type(self.tSavedData.tKnownBuffs) == "table" then
-			log:info("Loading saved buff config")
 			for _,b in pairs(self.tSavedData.tKnownBuffs) do		
-				BuffFilter:LearnBuff(
+				BuffFilter:RegisterBuff(
 					b.nBaseSpellId,
 					b.strName,		
 					b.strTooltip,
@@ -60,58 +58,55 @@ function BuffFilter:OnDocLoaded()
 			end			
 		end
 		
-		-- Load interval timer setting			
+		-- Restore interval timer setting			
 		if type(self.tSavedData.nTimer) == "number" then
 			self.wndSettings:FindChild("Slider"):SetValue(self.tSavedData.nTimer)
-			self.wndSettings:FindChild("SliderValue"):SetText(tostring(self.tSavedData.nTimer))
+		else
+			self.wndSettings:FindChild("Slider"):SetValue(3000)
 		end
+		self.wndSettings:FindChild("SliderValue"):SetText(tostring(self.wndSettings:FindChild("Slider"):GetValue()))
 		
+		-- Clear saved data object
 		self.tSavedData = nil
 	else
 		log:info("No saved config found. First run?")
 	end
 			
-	-- Fire once and start timer for buff scanning
+	-- Fire scanner once and start timer
 	BuffFilter:OnTimer()
-	self.scanTimer = ApolloTimer.Create(3, true, "OnTimer", self)
+	self.scanTimer = ApolloTimer.Create(self.wndSettings:FindChild("Slider"):GetValue()/1000, true, "OnTimer", self)
+	
+	-- Hook into tooltip generation
+	BuffFilter:HookBuffTooltipGeneration()
 	
 	-- TODO: showing settings is only for dev, not prod
-	self.wndSettings:Show(true, true)
+	self.wndSettings:Show(true, true)	
 end
 
--- Used to combine SpellID with the tooltip
+-- Hack to combine spellId/details with the tooltip, since only half of each 
+-- data set is available on the PlayerUnit:GetBuffs() vs GUI buff container
 function BuffFilter:HookBuffTooltipGeneration()
-	local TT = Apollo.GetAddon("ToolTips")
-	local origCreateCallNames = TT.CreateCallNames
-	local origGetBuffTooltipForm
+	-- Tooltip basic code hooking lifted from addon Generalist. Super addon, super idea :)
+	local origGetBuffTooltipForm = Tooltip.GetBuffTooltipForm
+	Tooltip.GetBuffTooltipForm = function(luaCaller, wndParent, splSource, tFlags)			
+		-- Let original function produce tooltip window
+		local wndTooltip = origGetBuffTooltipForm(luaCaller, wndParent, splSource, tFlags)
+		 
+		-- Register the buff having its tooltip displayed.
+		-- NB: At this point in time, wndParent actually targets the icon-to-hide. 
+		-- But using this ref would mean relying on the user to mouse-over the tooltip 
+		-- every time it should be hidden. So, better to re-scan and tooltip-match later.
+		BuffFilter:RegisterBuff(
+			splSource:GetBaseSpellId(),
+			splSource:GetName(),	
+			wndParent:GetBuffTooltip(),
+			splSource:GetIcon(),		
+			splSource:IsBeneficial(),
+			false)
 
-	-- Inject own function into CreateCallNames
-	TT.CreateCallNames = function(luaCaller)	
-		-- First, call the orignal function to create the original callbacks
-		origCreateCallNames(luaCaller)
-		
-		-- Then, override GetBuffTooltipForm with own function
-		origGetBuffTooltipForm = Tooltip.GetBuffTooltipForm
-		Tooltip.GetBuffTooltipForm = function(luaCaller, wndParent, splSource, tFlags)			
-			-- Let original function produce tooltip window
-			local wndTooltip = origGetBuffTooltipForm(luaCaller, wndParent, splSource, tFlags)
-			 
-			-- Learn the buff.
-			-- NB: At this point in time, wndParent actually targets the icon-to-hide. 
-			-- But using this ref would mean relying on the user to mouse-over the tooltip 
-			-- every time it should be hidden. So, better to re-scan and tooltip-match later.
-			BuffFilter:LearnBuff(
-				splSource:GetBaseSpellId(),
-				splSource:GetName(),	
-				wndParent:GetBuffTooltip(),
-				splSource:GetIcon(),		
-				splSource:IsBeneficial(),
-				false)
-
-			-- Return generated tooltip to client addon
-			return wndTooltip
-		end
-	end	
+		-- Return generated tooltip to client addon
+		return wndTooltip
+	end
 end
 
 -- Scan all active buffs for hide-this-buff config
@@ -183,20 +178,21 @@ function BuffFilter:OnRestore(eType, tSavedData)
 		return 
 	end
 	
-	-- Store saved data for later use (wait with re-learning buffs until addon/gui is fully initialized)
+	-- Store saved data for later use 
+	-- (wait with registering buffs until addon/gui is fully initialized)
 	BuffFilter.tSavedData = tSavedData	
 end
 
--- Learn buffs either by reading from addon savedata file, or from tooltip mouseovers
-function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)	
-
+-- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
+function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)	
+	--log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
 		-- Buff already known, do nothing
 		return
 	end
 	
-	log:debug("Buff registered: '%s'", strName)
+	log:info("Registering buff: '%s'", strName)
 	
 	-- Construct buff details table
 	local tBuffDetails =  {
@@ -210,13 +206,7 @@ function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBen
 	
 	-- Add to byId table
 	BuffFilter.tBuffsById[tBuffDetails.nBaseSpellId] = tBuffDetails
-	
-	-- Add to byTooltip table (multiple buffs per tooltip possible)
-	if BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip] == nil then
-		BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip] = {}
-	end
-	BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip][#BuffFilter.tBuffsByTooltip+1] = tBuffDetails
-	
+
 	-- Update summarized show/hide status for this tooltip	
 	if BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] == nil then
 		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = false
@@ -244,28 +234,6 @@ function BuffFilter:OnHideSettings()
 end
 
 
-function BuffFilter:OnHideButtonChange(wndHandler, wndControl)	
-	log:debug("OnHideButtonChange")
-	
-	local tBuffDetails = wndControl:GetCurrentRow()GetData()	
-	local bHide = wndControl:IsChecked()
-		
-	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
-	for _,b in ipairs(BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip]) do
-		b.bHide = bHide
-	end
-	
-	-- Also update the by-tooltip summary table 
-	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = bHide
-	
-	-- Force update
-	BuffFilter:OnTimer()
-end
-
-
----------------------------------------------------------------------------------------------------
--- SettingsForm Functions
----------------------------------------------------------------------------------------------------
 function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
 	self.wndSettings:FindChild("SliderValue"):SetText(tostring(fNewValue))
 	self.scanTimer:Stop()
@@ -275,18 +243,28 @@ end
 function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	local grid = self.wndSettings:FindChild("Grid")	
 	local tBuffDetails = grid:GetCellData(nRow, 1)
+	local bUpdatedHide = not tBuffDetails.bHide
 	
-	log:debug("Toggling buff '%s', %s --> %s", tBuffDetails.strName, tostring(tBuffDetails.bHide), tostring(not tBuffDetails.bHide))
-	tBuffDetails.bHide = not tBuffDetails.bHide
+	--log:info("Toggling buff '%s', %s --> %s", tBuffDetails.strName, tostring(tBuffDetails.bHide), tostring(bUpdatedHide))
 	
-	self:SetGridRowStatus(nRow, tBuffDetails.bHide)	
+	local strTooltip = tBuffDetails.strTooltip
 	
+		
 	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
-	for _,b in ipairs(BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip]) do
-		b.bHide = tBuffDetails.bHide
+	for r = 1, grid:GetRowCount() do -- for every row on the grid
+		-- Get buff for this row
+		local tRowBuffDetails = grid:GetCellData(r, 1)
+			
+		-- Check if this buff has same tooltip
+		if tRowBuffDetails.strTooltip == strTooltip then
+			tRowBuffDetails.bHide = bUpdatedHide
+			self:SetGridRowStatus(r, bUpdatedHide)	
+			log:info("Toggling buff '%s', %s --> %s", tBuffDetails.strName, tostring(tBuffDetails.bHide), tostring(bUpdatedHide))
+		end
+
 	end
 	
-	-- Also update the by-tooltip summary table 
+	-- Also update the by-tooltip summary table to latest value
 	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = tBuffDetails.bHide
 	
 	-- Force update
@@ -305,3 +283,8 @@ function BuffFilter:SetGridRowStatus(nRow, bHide)
 		grid:SetCellSortText(nRow, 3, "0")
 	end	
 end
+
+function BuffFilter:OnWindowKeyDown( wndHandler, wndControl, strKeyName, nScanCode, nMetakeys )
+	log:debug("OnWindowKeyDown")
+end
+
