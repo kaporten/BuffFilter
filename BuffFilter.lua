@@ -1,9 +1,15 @@
 require "Window"
 
-local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", "Buff Filter")
+local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true)
 BuffFilter.ADDON_VERSION = {0, 2, 0}
 
 local log
+
+function BuffFilter:OnInitialize()
+	self.tBuffsById = self.tBuffsById or {}
+	self.tBuffsByTooltip = self.tBuffsByTooltip or {}
+	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
+end
 
 function BuffFilter:OnEnable()	
 	-- GeminiLogger options
@@ -17,16 +23,9 @@ function BuffFilter:OnEnable()
 	self.log = log -- store ref for GeminiConsole-access to loglevel
 	log:info("Initializing addon 'BuffFilter'")
 	
-	
+	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
 	self.xmlDoc:RegisterCallback("OnDocLoaded", self)
-	
-	-- Initialize empty settings, if none were loaded
-	if self.tSettings == nil or self.tSettings.tBuffs == nil then
-		self.tSettings = {}
-		self.tSettings.tBuffs = {}
-		log:info("No saved settings, first time load?")
-	end
 
 	-- Hook into the tooltip generation framework
 	self:HookBuffTooltipGeneration()	
@@ -44,7 +43,26 @@ function BuffFilter:OnDocLoaded()
 		--self.xmlDoc = nil -- Keep in mem for spawning child forms
 	end
 		
-	-- Start timer for buff scanning
+	-- "learn" buffs from savedata
+	if self.tSavedData ~= nil and type(self.tSavedData) == "table" and type(self.tSavedData.tKnownBuffs) == "table" then
+		log:info("Loading saved buff config")
+		for _,b in pairs(self.tSavedData.tKnownBuffs) do		
+			BuffFilter:LearnBuff(
+				b.nBaseSpellId,
+				b.strName,		
+				b.strTooltip,
+				b.strIcon,		
+				b.bIsBeneficial,
+				b.bHide
+			)
+		end
+		self.tSavedData = nil
+	else
+		log:info("No saved buff config found. First run?")
+	end
+			
+	-- Fire once and start timer for buff scanning
+	BuffFilter:OnTimer()
 	self.scanTimer = ApolloTimer.Create(3, true, "OnTimer", self)
 end
 
@@ -75,7 +93,7 @@ function BuffFilter:HookBuffTooltipGeneration()
 				wndParent:GetBuffTooltip(),
 				splSource:GetIcon(),		
 				splSource:IsBeneficial(),
-				true)
+				false)
 
 			-- Return generated tooltip to client addon
 			return wndTooltip
@@ -85,36 +103,8 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	--log:debug("BuffFilter timer")
-	
-	local activeBuffs = GameLib.GetPlayerUnit():GetBuffs()
-	local tHideBene = BuffFilter:ScanBuffs(activeBuffs.arBeneficial)
-	
-	if #tHideBene > 0 then
-		--log:debug("Hiding %d buffs", #tHideBene)
-		BuffFilter:FilterBuffs(tHideBene)
-	end
-end
-
-function BuffFilter:ScanBuffs(tActiveBuffs)
-	--log:debug("Scanning buff list")
-	if tActiveBuffs == nil then return {} end
-	
-	local tHide = {}
-	local tBuffConfigs = self.tSettings.tBuffs
-	
-	-- For each active buff, check if we have a known config indicating that it should be hidden
-	for _,splActiveBuff in ipairs(tActiveBuffs) do
-		local splId = splActiveBuff.splEffect:GetBaseSpellId()
-		local conf = tBuffConfigs[splId]
-		
-		if conf ~= nil and conf.Show == false then
-			-- Buff to hide identified, add to TODO list
-			tHide[#tHide+1] = conf		
-			--log:debug("Active buff '%s' configured hiding", conf.Name)
-		end
-	end
-	return tHide
+	log:debug("BuffFilter timer")
+	BuffFilter:FilterBuffsOnBar(BuffFilter:GetPlayerBeneBuffBar())
 end
 
 
@@ -144,14 +134,10 @@ function BuffFilter:GetPlayerBeneBuffBar()
 	end
 end
 
-function BuffFilter:FilterBuffs(tHide)
-	--log:debug("Filtering buffs")
-	local playerBeneBuffBar = self:GetPlayerBeneBuffBar()
-	self:FilterBuffsOnBar(playerBeneBuffBar, tHide)
-end
 
-function BuffFilter:FilterBuffsOnBar(wndBuffBar, tToHide)
-	--log:debug("Filtering buffs on Bar")
+
+function BuffFilter:FilterBuffsOnBar(wndBuffBar)
+	log:debug("Filtering buffs on Bar")
 	-- Get buff child windows on bar
 	local wndCurrentBuffs = wndBuffBar:GetChildren()
 	
@@ -159,15 +145,10 @@ function BuffFilter:FilterBuffsOnBar(wndBuffBar, tToHide)
 			
 	-- Buffs found, loop over them all, hide ones on todo list
 	for _,wndCurrentBuff in ipairs(wndCurrentBuffs) do
-		for _,b in ipairs(tToHide) do
-			local strHideTooltip = b.Tooltip
-			
-			if wndCurrentBuff:GetBuffTooltip() == strHideTooltip then
-				
-				--log:debug("Hiding buff '%s'", b.Name)
-				wndCurrentBuff:Show(false)
-			end		
-		end
+		local strBuffTooltip = wndCurrentBuff:GetBuffTooltip()
+		
+		local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip]
+		wndCurrentBuff:Show(not bShouldHide)
 	end
 end
 
@@ -190,25 +171,12 @@ function BuffFilter:OnRestore(eType, tSavedData)
 		return 
 	end
 	
-	-- "learn" buffs from savedata
-	if tSavedData ~= nil and type(tSavedData) == "table" and type(tSavedData.tKnownBuffs) == "table" then
-		for _,b in ipairs(tSavedData.tKnownBuffs) do
-			BuffFilter:LearnBuff(
-				b.nBaseSpellId,
-				b.strName,		
-				b.strTooltip,
-				b.strIcon,		
-				b.bIsBeneficial,
-				b.bShow
-			)
-		end
-	end
+	-- Store saved data for later use (wait with re-learning buffs until addon/gui is fully initialized)
+	BuffFilter.tSavedData = tSavedData	
 end
 
 -- Learn buffs either by reading from addon savedata file, or from tooltip mouseovers
-function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bShow)	
-	if BuffFilter.tBuffsById == nil then self.tBuffsById = {} end
-	if BuffFilter.tBuffsByTooltip == nil then self.tBuffsByTooltip = {} end
+function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)	
 
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
@@ -216,7 +184,7 @@ function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBen
 		return
 	end
 	
-	log:debug("New buff registered: '%s', tooltip: '%s'", strName, strTooltip)
+	log:debug("Buff registered: '%s'", strName)
 	
 	-- Construct buff details table
 	local tBuffDetails =  {
@@ -225,7 +193,7 @@ function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBen
 		strTooltip = strTooltip,
 		strIcon = strIcon,		
 		bIsBeneficial = bIsBeneficial,
-		bShow = bShow
+		bHide = bHide
 	}
 	
 	-- Add to byId table
@@ -237,11 +205,21 @@ function BuffFilter:LearnBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBen
 	end
 	BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip][#BuffFilter.tBuffsByTooltip+1] = tBuffDetails
 	
+	-- Update summarized show/hide status for this tooltip	
+	if BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] == nil then
+		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = false
+	end
+	if bHide == true then
+		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = true
+	end
+
+	
+	
 	-- Add buff to the Settings window
 	local wndBuffLine = Apollo.LoadForm(self.xmlDoc, "BuffLineForm", BuffFilter.wndSettings:FindChild("BuffLineArea"), self)
 	wndBuffLine:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)
 	wndBuffLine:FindChild("BuffName"):SetText(tBuffDetails.strName)
-	wndBuffLine:SetData(tBuffDetails)
+	wndBuffLine:FindChild("HideButton"):SetData(tBuffDetails)
 	wndBuffLine:Show(true, false)
 	
 	BuffFilter.wndSettings:FindChild("BuffLineArea"):ArrangeChildrenVert()
@@ -260,9 +238,22 @@ end
 function BuffFilter:OnCancelSettings()
 	self.wndSettings:Show(false, true)
 end
----------------------------------------------------------------------------------------------------
--- BuffLineForm Functions
----------------------------------------------------------------------------------------------------
-function BuffFilter:OnHideButtonSignal(wndHandler, wndControl)
-	log:debug("OnHideButtonSignal")
+
+
+function BuffFilter:OnHideButtonChange(wndHandler, wndControl)	
+	log:debug("OnHideButtonChange")
+	local tBuffDetails = wndControl:GetData()	
+	local bHide = wndControl:IsChecked()
+		
+	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
+	for _,b in ipairs(BuffFilter.tBuffsByTooltip[tBuffDetails.strTooltip]) do
+		b.bHide = bHide
+	end
+	
+	-- Also update the by-tooltip summary table 
+	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = bHide
+	
+	-- Force update
+	BuffFilter:OnTimer()
 end
+
