@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {0, 8, 0}
+BuffFilter.ADDON_VERSION = {0, 9, 0}
 
 local log
 
@@ -73,7 +73,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.DEBUG,
+		level = GeminiLogging.FATAL,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -122,7 +122,7 @@ function BuffFilter:OnDocLoaded()
 		else
 			self.wndSettings:FindChild("Slider"):SetValue(3000)
 		end
-		self.wndSettings:FindChild("SliderValue"):SetText(tostring(self.wndSettings:FindChild("Slider"):GetValue()))
+		self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", self.wndSettings:FindChild("Slider"):GetValue()/1000))
 		
 		-- Clear saved data object
 		self.tSavedData = nil
@@ -309,8 +309,10 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	-- Add buff to Settings window grid
 	local grid = self.wndSettings:FindChild("Grid")
 	local nRow = grid:AddRow("", "", tBuffDetails)
-	grid:SetCellImage(nRow, 1, tBuffDetails.strIcon)
-	grid:SetCellText(nRow, 2, tBuffDetails.strName)
+	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
+	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "1" or "0")
+	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
+	grid:SetCellText(nRow, 3, tBuffDetails.strName)
 	
 	BuffFilter:SetGridRowStatus(nRow, tBuffDetails.bHide)
 end
@@ -382,7 +384,7 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 end
 
 function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
-	self.wndSettings:FindChild("SliderValue"):SetText(tostring(fNewValue))
+	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", self.wndSettings:FindChild("Slider"):GetValue()/1000))
 	self.scanTimer:Stop()
 	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
 end
@@ -391,10 +393,10 @@ function BuffFilter:SetGridRowStatus(nRow, bHide)
 	local grid = self.wndSettings:FindChild("Grid")	
 
 	if bHide == true then
-		grid:SetCellImage(nRow, 3, "achievements:sprAchievements_Icon_Complete")
-		grid:SetCellSortText(nRow, 3, "1")
+		grid:SetCellImage(nRow, 4, "achievements:sprAchievements_Icon_Complete")
+		grid:SetCellSortText(nRow, 4, "1")
 	else
-		grid:SetCellImage(nRow, 3, "")
-		grid:SetCellSortText(nRow, 3, "0")
+		grid:SetCellImage(nRow, 4, "")
+		grid:SetCellSortText(nRow, 4, "0")
 	end	
 end
