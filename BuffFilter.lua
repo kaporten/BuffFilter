@@ -147,8 +147,15 @@ end
 function BuffFilter:FilterBuffsOnBar(wndBuffBar)
 	--log:debug("Filtering buffs on Bar")
 	-- Get buff child windows on bar
+	
+	if wndBuffBar == nil then
+		log:warn("wndBuffBar input is nil")
+		return
+	end
+	
 	local wndCurrentBuffs = wndBuffBar:GetChildren()
 	
+	-- No buffs on buffbar? Just do nothing then.
 	if wndCurrentBuffs == nil then return end	
 			
 	-- Buffs found, loop over them all, hide ones on todo list
