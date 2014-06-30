@@ -2,15 +2,70 @@
 require "Apollo"
 require "Window"
 
-local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"TargetFrame", "ToolTips"})
-BuffFilter.ADDON_VERSION = {0, 7, 3}
+local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
+BuffFilter.ADDON_VERSION = {0, 8, 0}
 
 local log
 
+-- Enums for target/bufftype combinations
+local eTargetTypes = {
+	Player = "Player",
+	Target = "Target"
+}
+local eBuffTypes = {
+	Buff = "Buff",
+	Debuff = "Debuff"
+}
+
 function BuffFilter:OnInitialize()
-	-- Tables for criss-cross references of buffs & tooltips
+	-- Tables for criss-cross references of buffs & tooltips. May be initialized & populated during OnRestore.
 	self.tBuffsById = self.tBuffsById or {}
 	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
+	self.tBarsToScan = self.tBarsToScan or {}
+
+	-- Configuration for supported bar types
+	self.tBars = {
+		PlayerBeneBar = {
+			eTargetType = eTargetTypes.Player, 
+			eBuffType = eBuffTypes.Buff
+		},			
+		--PlayerHarmBar = {}, -- Not supported yet
+		--TargetBeneBar = {}, -- Not supported yet
+		--TargetHarmBar = {}, -- Not supported yet
+	}
+	
+	-- Configuration for supported bar providers (Addons). Key must match actual Addon name.
+	self.tBarProviders = {
+		-- Stock UI
+		["TargetFrame"] = {
+			fDiscoverBar = BuffFilter.FindBarStockUI,
+			fFilterBar = BuffFilter.FilterStockBar,
+			BuffFilter.FindBarStockUI,	
+			tTargetType = {
+				[eTargetTypes.Player] = "luaUnitFrame",
+				[eTargetTypes.Target] = "luaTargetFrame"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BeneBuffBar",
+				[eBuffTypes.Debuff] = "HarmBuffBar"
+			},
+		},
+
+		-- Potato UI
+		["PotatoFrames"] = {
+			fDiscoverBar = BuffFilter.FindBarPotatoUI,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "Player Frame",
+				[eTargetTypes.Target] = "Target Frame"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BeneBuffBar",
+				[eBuffTypes.Debuff] = "HarmBuffBar"
+			},
+		},		
+		--SimpleBuffBar = ???,	-- SimpleBuffBar not supported (yet?
+	}	
 end
 
 function BuffFilter:OnEnable()	
@@ -18,7 +73,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.FATAL,
+		level = GeminiLogging.DEBUG,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -73,6 +128,9 @@ function BuffFilter:OnDocLoaded()
 		self.tSavedData = nil
 	else
 		log:info("No saved config found. First run?")
+		
+		-- Default to scanning just the player bar
+		self.tBarsToScan.bPlayerBuffs = true		
 	end
 			
 	-- Fire scanner once and start timer
@@ -114,40 +172,89 @@ end
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
 	--log:debug("BuffFilter timer")
-	BuffFilter:FilterBuffsOnBar(BuffFilter:GetPlayerBeneBuffBar())
-end
-
-
-function BuffFilter:GetPlayerBeneBuffBar()
-	if self.playerBeneBuffBar ~= nil then
-		--log:debug("Reference to Player BeneBuffBar already found, returning that")
-		return self.playerBeneBuffBar
-	else
-		--log:debug("Searching for reference to Player BeneBuffBar")
-		
-		-- Safely dig into the GUI elements
-		local addonTargetFrame = Apollo.GetAddon("TargetFrame")
-		if addonTargetFrame == nil then return end
-		
-		local luaUnitFrame = addonTargetFrame.luaUnitFrame
-		if luaUnitFrame == nil then return end
-		
-		local wndMainClusterFrame = luaUnitFrame.wndMainClusterFrame
-		if wndMainClusterFrame == nil then return end
-		
-		local wndBeneBuffBar = wndMainClusterFrame:FindChild("BeneBuffBar")
-		if wndBeneBuffBar == nil then return end
-		
-		-- Player BeneBuffBar found, store ref for later use
-		self.playerBeneBuffBar = wndBeneBuffBar
-		return wndBeneBuffBar
+	local tBars = BuffFilter:GetBarsToFilter()
+	--log:debug("%d bars to scan identified", #tBars)
+	
+	for _,tBar in ipairs(tBars) do
+		-- Call provider-specific filter function.
+		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
+		tBar.fFilterBar(tBar.bar)
 	end
 end
 
-function BuffFilter:FilterBuffsOnBar(wndBuffBar)
-	--log:debug("Filtering buffs on Bar")
-	-- Get buff child windows on bar
+--
+function BuffFilter:GetBarsToFilter()
+	local result = {}
+
+	-- Identify all bars to filter
+	for strBar, tBarDetails in pairs(BuffFilter.tBars) do
+		if tBarDetails.tPermanentBar ~= nil then
+			-- Bar previously identified / permanent, no need to search for it.
+			result[#result+1] = tBarDetails.tPermanentBar
+		else
+			-- Bar not previously identified, or is not permanent.
+			-- Call each provider-specific function to scan for the bar
+			for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do				
+				if tProviderDetails.fDiscoverBar ~= nil then
+					-- Translate bar target/bufftype properties to provider specific values
+					local strBarTypeParam = tProviderDetails.tTargetType[tBarDetails.eTargetType]
+					local strBuffTypeParam = tProviderDetails.tBuffType[tBarDetails.eBuffType]
+					--log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
+										
+					-- Safe call for provider-specific discovery function
+					local bStatus, discoveryResult, bPermanent = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
+					if bStatus == true then
+						log:info("Bar '%s' found for provider '%s'", strBar, strProvider)
+					
+						-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
+						local tFoundBar = {
+							fFilterBar = tProviderDetails.fFilterBar,
+							bar = discoveryResult
+						}
+						
+						-- Provider allows permanent ref-storage?
+						if bPermanent == true then							
+							tBarDetails.tPermanentBar = tFoundBar
+						end
+						
+						-- Add found bar to result and break innermost (provider) for-loop
+						result[#result+1] = tFoundBar
+						break
+					else
+						-- This is expected to occur, since provider-scanning is not 
+						-- sorted by known providers (TODO?), but just checked one at a time
+						log:info("Unable to locate bar '%s' for provider '%s':\n%s", strBar, strProvider, discoveryResult)
+					end
+				end
+			end
+		end
+	end
 	
+	return result
+end
+
+-- Stock UI-specific bar search
+function BuffFilter.FindBarStockUI(strTargetType, strBuffType)	
+	return 
+		Apollo.GetAddon("TargetFrame")[strTargetType].wndMainClusterFrame:FindChild(strBuffType),
+		true -- safe to keep permanent reference
+end
+
+-- PotatoUI-specific bar search
+function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
+	for _,frame in ipairs(Apollo.GetAddon("PotatoFrames").tFrames) do
+		if frame.frameData.name == strTargetType then 
+			return 
+				frame.buffs:FindChild(strBuffType),
+				true -- safe to keep permanent reference
+		end
+	end
+end
+
+function BuffFilter.FilterStockBar(wndBuffBar)
+	--log:debug("Filtering buffs on stock bar")
+	
+	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
 		log:warn("wndBuffBar input is nil")
 		return
@@ -165,31 +272,6 @@ function BuffFilter:FilterBuffsOnBar(wndBuffBar)
 		local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip]
 		wndCurrentBuff:Show(not bShouldHide)
 	end
-end
-
--- Save addon config per character. Called by engine when performing a controlled game shutdown.
-function BuffFilter:OnSave(eType)
-	if eType ~= GameLib.CodeEnumAddonSaveLevel.Character then 
-		return 
-	end
-	
-	-- Add current addon version to settings, for future compatibility/load checks
-	local tSaveData = {}
-	tSaveData.addonVersion = self.ADDON_VERSION
-	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
-	tSaveData.nTimer = self.wndSettings:FindChild("Slider"):GetValue()
-	return tSaveData	
-end
-
--- Restore addon config per character. Called by engine when loading UI.
-function BuffFilter:OnRestore(eType, tSavedData)
-	if eType ~= GameLib.CodeEnumAddonSaveLevel.Character then 
-		return 
-	end
-	
-	-- Store saved data for later use 
-	-- (wait with registering buffs until addon/gui is fully initialized)
-	BuffFilter.tSavedData = tSavedData	
 end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
@@ -233,20 +315,43 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	BuffFilter:SetGridRowStatus(nRow, tBuffDetails.bHide)
 end
 
+
+--[[ SETTINGS SAVE/RESTORE ]]
+
+-- Save addon config per character. Called by engine when performing a controlled game shutdown.
+function BuffFilter:OnSave(eType)
+	if eType ~= GameLib.CodeEnumAddonSaveLevel.Character then 
+		return 
+	end
+	
+	-- Add current addon version to settings, for future compatibility/load checks
+	local tSaveData = {}
+	tSaveData.addonVersion = self.ADDON_VERSION
+	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
+	tSaveData.nTimer = self.wndSettings:FindChild("Slider"):GetValue()
+	return tSaveData	
+end
+
+-- Restore addon config per character. Called by engine when loading UI.
+function BuffFilter:OnRestore(eType, tSavedData)
+	if eType ~= GameLib.CodeEnumAddonSaveLevel.Character then 
+		return 
+	end
+	
+	-- Store saved data for later use 
+	-- (wait with registering buffs until addon/gui is fully initialized)
+	BuffFilter.tSavedData = tSavedData	
+end
+
+
+--[[ SETTINGS GUI ]]
+
 function BuffFilter:OnConfigure()
 	self.wndSettings:Show(true, false)	
 end
 
-
 function BuffFilter:OnHideSettings()
 	self.wndSettings:Show(false, true)
-end
-
-
-function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
-	self.wndSettings:FindChild("SliderValue"):SetText(tostring(fNewValue))
-	self.scanTimer:Stop()
-	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
 end
 
 function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
@@ -276,6 +381,11 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	BuffFilter:OnTimer()
 end
 
+function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
+	self.wndSettings:FindChild("SliderValue"):SetText(tostring(fNewValue))
+	self.scanTimer:Stop()
+	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
+end
 
 function BuffFilter:SetGridRowStatus(nRow, bHide)
 	local grid = self.wndSettings:FindChild("Grid")	
