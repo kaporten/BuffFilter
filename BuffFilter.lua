@@ -3,9 +3,10 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {0, 9, 0}
+BuffFilter.ADDON_VERSION = {1, 0, 0}
 
 local log
+local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -52,7 +53,7 @@ function BuffFilter:OnInitialize()
 		["TargetFrame"] = {
 			fDiscoverBar = BuffFilter.FindBarStockUI,
 			fFilterBar = BuffFilter.FilterStockBar,
-			BuffFilter.FindBarStockUI,	
+			BuffFilter.FindBarStockUI,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaUnitFrame",
 				[eTargetTypes.Target] = "luaTargetFrame"
@@ -259,23 +260,39 @@ end
 
 -- Stock UI-specific bar search
 function BuffFilter.FindBarStockUI(strTargetType, strBuffType)	
+	local TF = Apollo.GetAddon("TargetFrame")
+	if TF == nil then 
+		error("Addon 'TargetFrame' not found. Replaced by custom unit frame addon?")
+		return
+	end
+	
+	local targetFrame = TF[strTargetType]
+	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)
+	
+	-- If bar is found (ie., if above line of code didn't fail), check if we found a Target frame.
+	-- If so, hook into the stock "target changed" function for immediate updates
+	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
+		if not H:IsHooked(TF, "OnTargetUnitChanged") then
+			H:RawHook(TF, "OnTargetUnitChanged", BuffFilter.TargetChangedStock)
+		end
+	end
+	
 	return 
-		Apollo.GetAddon("TargetFrame")[strTargetType].wndMainClusterFrame:FindChild(strBuffType),
+		bar,
 		true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
 end
 
 -- PotatoUI-specific bar search
 function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	-- PotatoUI stores the actual buff bar as a sub-element called "buffs" or "debuffs".
-	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".
-	-- TODO: Consider moving all this translation here and just pass in the eBuffType instead for cleaner interface.	
-	local strSubframe = strBuffType == "BeneBuffBar" and "buffs" or "debuffs"
+	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".	
+	local strSubframe = strBuffType == BuffFilter.tBarProviders["PotatoFrames"].tBuffType[eBuffTypes.Buff] and "buffs" or "debuffs"
 	
 	for _,frame in ipairs(Apollo.GetAddon("PotatoFrames").tFrames) do
 		if frame.frameData.name == strTargetType then 		
 			return 
 				frame[strSubframe]:FindChild(strBuffType),
-				true -- TODO: test if safe to reuse
+				true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
 		end
 	end
 end
@@ -303,6 +320,25 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType)
 		
 		local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
 		wndCurrentBuff:Show(not bShouldHide)
+	end
+end
+
+-- Called when the target changes. Setup is done in the stock bar discovery function "FindBarStockUI"
+function BuffFilter:TargetChangedStock(unitTarget)
+	log:info("Stock Target change intercepted")
+	
+	-- First, pass call to the real TargetFrame addon
+	local TF = Apollo.GetAddon("TargetFrame")	
+	H.hooks[TF].OnTargetUnitChanged(TF, unitTarget)
+
+	--[[
+		Curiosity: the target change itself does not actually update the buff-bar contents.
+		That apparently happens at 0.1s intervals, regardless of target change. So, once
+		a target change is identified (=now), schedule a single buff-filter in 100ms. That
+		should be enough time for the buffs to actually be present on the target bars.
+	]]
+	if unitTarget ~= nil then
+		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
 	end
 end
 
