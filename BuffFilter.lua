@@ -25,18 +25,25 @@ function BuffFilter:OnInitialize()
 
 	-- Configuration for supported bar types
 	self.tBars = {
+		-- Player buff / debuff bar
 		PlayerBeneBar = {
 			eTargetType = eTargetTypes.Player, 
 			eBuffType = eBuffTypes.Buff
 		},			
+		PlayerHarmBar = {
+			eTargetType = eTargetTypes.Player, 
+			eBuffType = eBuffTypes.Debuff
+		},			
+
+		-- Target buff / debuff bar
 		TargetBeneBar = {
 			eTargetType = eTargetTypes.Target, 
 			eBuffType = eBuffTypes.Buff
 		},			
-
-		--PlayerHarmBar = {}, -- Not supported yet
-		--TargetBeneBar = {}, -- Not supported yet
-		--TargetHarmBar = {}, -- Not supported yet
+		TargetHarmBar = {
+			eTargetType = eTargetTypes.Target, 
+			eBuffType = eBuffTypes.Debuff
+		},
 	}
 	
 	-- Configuration for supported bar providers (Addons). Key must match actual Addon name.
@@ -74,7 +81,7 @@ function BuffFilter:OnInitialize()
 	
 	-- Stores permanent references to discovered bars, to avoid having 
 	-- to re-search on every timer pass. Key is tBars-value (f.ex "PlayerBeneBar"),
-	-- value is the "tFoundBar" strucutre created in GetBarsToFilter()
+	-- value is the "tFoundBar" structure created in GetBarsToFilter()
 	self.tBarStorage = {}
 end
 
@@ -83,7 +90,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.DEBUG,
+		level = GeminiLogging.FATAL,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -150,7 +157,11 @@ function BuffFilter:OnDocLoaded()
 	
 	-- Hook into tooltip generation
 	BuffFilter:HookBuffTooltipGeneration()
-		
+	
+	-- Register slash command to display settings
+	Apollo.RegisterSlashCommand("bf", "OnConfigure", self)
+	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
+	
 	--self.wndSettings:Show(true, true)	
 end
 
@@ -183,11 +194,11 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	log:debug("BuffFilter timer")
+	--log:debug("BuffFilter timer")
 	local tBarsToFilter = BuffFilter:GetBarsToFilter()
-	log:debug("%d bars to scan identified", #tBarsToFilter)
+	--log:debug("%d bars to scan identified", #tBarsToFilter)
 	
-	for _,b in ipairs(tBarsToFilter) do
+	for _,b in ipairs(tBarsToFilter) do		
 		-- Call provider-specific filter function.
 		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
 		b.fFilterBar(b.bar, b.tBar.eTargetType)
@@ -211,7 +222,7 @@ function BuffFilter:GetBarsToFilter()
 					-- Translate bar target/bufftype properties to provider specific values
 					local strBarTypeParam = tProviderDetails.tTargetType[tBar.eTargetType]
 					local strBuffTypeParam = tProviderDetails.tBuffType[tBar.eBuffType]
-					log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
+					--log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
 										
 					-- Safe call for provider-specific discovery function
 					local bStatus, discoveryResult, bPermanent = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
@@ -255,17 +266,25 @@ end
 
 -- PotatoUI-specific bar search
 function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
+	-- PotatoUI stores the actual buff bar as a sub-element called "buffs" or "debuffs".
+	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".
+	-- TODO: Consider moving all this translation here and just pass in the eBuffType instead for cleaner interface.	
+	local strSubframe = strBuffType == "BeneBuffBar" and "buffs" or "debuffs"
+	
 	for _,frame in ipairs(Apollo.GetAddon("PotatoFrames").tFrames) do
-		if frame.frameData.name == strTargetType then 
+		if frame.frameData.name == strTargetType then 		
 			return 
-				frame.buffs:FindChild(strBuffType),
+				frame[strSubframe]:FindChild(strBuffType),
 				true -- TODO: test if safe to reuse
 		end
 	end
 end
 
+-- Function for filtering buffs from any stock buff-bar. 
+-- This function does not distinguish between buff and debuff-bars, since
+-- they are the same kind of monster, just with different flags.
 function BuffFilter.FilterStockBar(wndBuffBar, eTargetType)
-	log:debug("Filtering buffs on stock %s-bar", eTargetType)
+	--log:debug("Filtering buffs on stock %s-bar", eTargetType)
 	
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
@@ -289,7 +308,7 @@ end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
 function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHidePlayer, bHideTarget)	
-	log:debug("RegisterBuff called")
+	--log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
 		-- Buff already known, do nothing
@@ -324,7 +343,7 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	local grid = self.wndSettings:FindChild("Grid")
 	local nRow = grid:AddRow("", "", tBuffDetails)
 	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
-	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "1" or "0")
+	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")--tBuffDetails.bIsBeneficial and "1" or "0")
 	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
 	grid:SetCellText(nRow, 3, tBuffDetails.strName)	
 	BuffFilter:SetGridRowStatus(nRow, eTargetTypes.Player, bHidePlayer)
