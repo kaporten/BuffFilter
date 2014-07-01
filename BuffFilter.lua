@@ -65,7 +65,12 @@ function BuffFilter:OnInitialize()
 			},
 		},		
 		--SimpleBuffBar = ???,	-- SimpleBuffBar not supported (yet?
-	}	
+	}
+	
+	-- Stores permanent references to discovered bars, to avoid having 
+	-- to re-search on every timer pass. Key is tBars-value (f.ex "PlayerBeneBar"),
+	-- value is the "tFoundBar" strucutre created in GetBarsToFilter()
+	self.tBarStorage = {}
 end
 
 function BuffFilter:OnEnable()	
@@ -73,7 +78,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.FATAL,
+		level = GeminiLogging.DEBUG,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -104,14 +109,15 @@ function BuffFilter:OnDocLoaded()
 		
 		-- Register buffs from savedata
 		if type(self.tSavedData.tKnownBuffs) == "table" then
-			for _,b in pairs(self.tSavedData.tKnownBuffs) do		
+			for _,b in pairs(self.tSavedData.tKnownBuffs) do
 				BuffFilter:RegisterBuff(
 					b.nBaseSpellId,
 					b.strName,		
 					b.strTooltip,
 					b.strIcon,		
 					b.bIsBeneficial,
-					b.bHide
+					b.bHide[eTargetTypes.Player],
+					b.bHide[eTargetTypes.Target]
 				)
 			end			
 		end
@@ -162,6 +168,7 @@ function BuffFilter:HookBuffTooltipGeneration()
 			wndParent:GetBuffTooltip(),
 			splSource:GetIcon(),		
 			splSource:IsBeneficial(),
+			false,
 			false)
 
 		-- Return generated tooltip to client addon
@@ -171,14 +178,14 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	--log:debug("BuffFilter timer")
-	local tBars = BuffFilter:GetBarsToFilter()
-	--log:debug("%d bars to scan identified", #tBars)
+	log:debug("BuffFilter timer")
+	local tBarsToFilter = BuffFilter:GetBarsToFilter()
+	log:debug("%d bars to scan identified", #tBarsToFilter)
 	
-	for _,tBar in ipairs(tBars) do
+	for _,b in ipairs(tBarsToFilter) do
 		-- Call provider-specific filter function.
 		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
-		tBar.fFilterBar(tBar.bar)
+		b.fFilterBar(b.bar, b.tBar.eTargetType)
 	end
 end
 
@@ -187,19 +194,19 @@ function BuffFilter:GetBarsToFilter()
 	local result = {}
 
 	-- Identify all bars to filter
-	for strBar, tBarDetails in pairs(BuffFilter.tBars) do
-		if tBarDetails.tPermanentBar ~= nil then
+	for strBar, tBar in pairs(BuffFilter.tBars) do
+		if BuffFilter.tBarStorage[strBar] ~= nil then
 			-- Bar previously identified / permanent, no need to search for it.
-			result[#result+1] = tBarDetails.tPermanentBar
+			result[#result+1] = BuffFilter.tBarStorage[strBar]
 		else
 			-- Bar not previously identified, or is not permanent.
 			-- Call each provider-specific function to scan for the bar
 			for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do				
 				if tProviderDetails.fDiscoverBar ~= nil then
 					-- Translate bar target/bufftype properties to provider specific values
-					local strBarTypeParam = tProviderDetails.tTargetType[tBarDetails.eTargetType]
-					local strBuffTypeParam = tProviderDetails.tBuffType[tBarDetails.eBuffType]
-					--log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
+					local strBarTypeParam = tProviderDetails.tTargetType[tBar.eTargetType]
+					local strBuffTypeParam = tProviderDetails.tBuffType[tBar.eBuffType]
+					log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
 										
 					-- Safe call for provider-specific discovery function
 					local bStatus, discoveryResult, bPermanent = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
@@ -208,13 +215,14 @@ function BuffFilter:GetBarsToFilter()
 					
 						-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
 						local tFoundBar = {
-							fFilterBar = tProviderDetails.fFilterBar,
-							bar = discoveryResult
+							tBar = tBar,								-- Bar config we found a hit for
+							fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
+							bar = discoveryResult,						-- Reference to actual bar instance							
 						}
 						
 						-- Provider allows permanent ref-storage?
 						if bPermanent == true then							
-							tBarDetails.tPermanentBar = tFoundBar
+							BuffFilter.tBarStorage[strBar] = tFoundBar
 						end
 						
 						-- Add found bar to result and break innermost (provider) for-loop
@@ -251,8 +259,8 @@ function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	end
 end
 
-function BuffFilter.FilterStockBar(wndBuffBar)
-	--log:debug("Filtering buffs on stock bar")
+function BuffFilter.FilterStockBar(wndBuffBar, eTargetType)
+	log:debug("Filtering buffs on stock %s-bar", eTargetType)
 	
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
@@ -269,14 +277,14 @@ function BuffFilter.FilterStockBar(wndBuffBar)
 	for _,wndCurrentBuff in ipairs(wndCurrentBuffs) do
 		local strBuffTooltip = wndCurrentBuff:GetBuffTooltip()
 		
-		local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip]
+		local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
 		wndCurrentBuff:Show(not bShouldHide)
 	end
 end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
-function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)	
-	--log:debug("RegisterBuff called")
+function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHidePlayer, bHideTarget)	
+	log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
 		-- Buff already known, do nothing
@@ -292,19 +300,20 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		strTooltip = strTooltip,
 		strIcon = strIcon,		
 		bIsBeneficial = bIsBeneficial,
-		bHide = bHide
+		bHide = {
+			[eTargetTypes.Player] = bHidePlayer,
+			[eTargetTypes.Target] = bHideTarget
+		}
 	}
 	
 	-- Add to byId table
 	BuffFilter.tBuffsById[tBuffDetails.nBaseSpellId] = tBuffDetails
 
-	-- Update summarized show/hide status for this tooltip	
-	if BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] == nil then
-		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = false
-	end
-	if bHide == true then
-		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = true
-	end	
+	-- Update summarized show/hide status for this tooltip. Any existing hide=true is preserved.
+	local tTTStatus = BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] or {}
+	tTTStatus[eTargetTypes.Player] = tTTStatus[eTargetTypes.Player] or bHidePlayer
+	tTTStatus[eTargetTypes.Target] = tTTStatus[eTargetTypes.Target] or bHideTarget
+	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = tTTStatus
 	
 	-- Add buff to Settings window grid
 	local grid = self.wndSettings:FindChild("Grid")
@@ -312,9 +321,9 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
 	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "1" or "0")
 	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
-	grid:SetCellText(nRow, 3, tBuffDetails.strName)
-	
-	BuffFilter:SetGridRowStatus(nRow, tBuffDetails.bHide)
+	grid:SetCellText(nRow, 3, tBuffDetails.strName)	
+	BuffFilter:SetGridRowStatus(nRow, eTargetTypes.Player, bHidePlayer)
+	BuffFilter:SetGridRowStatus(nRow, eTargetTypes.Target, bHideTarget)
 end
 
 
@@ -359,9 +368,13 @@ end
 function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	local grid = self.wndSettings:FindChild("Grid")	
 	local tBuffDetails = grid:GetCellData(nRow, 1)
-	local bUpdatedHide = not tBuffDetails.bHide
-	
 	local strTooltip = tBuffDetails.strTooltip
+
+	-- Determine if the Player or Target column was clicked
+	local eTargetType = nColumn == 4 and eTargetTypes.Player or eTargetTypes.Target
+	
+	-- Toggled hide boolean for this target type
+	local bUpdatedHide = not tBuffDetails.bHide[eTargetType]
 	
 	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
 	for r = 1, grid:GetRowCount() do -- for every row on the grid
@@ -370,14 +383,14 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 			
 		-- Check if this buff has same tooltip
 		if tRowBuffDetails.strTooltip == strTooltip then
-			log:info("Toggling buff '%s', %s --> %s", tRowBuffDetails.strName, tostring(tRowBuffDetails.bHide), tostring(bUpdatedHide))
-			tRowBuffDetails.bHide = bUpdatedHide
-			self:SetGridRowStatus(r, bUpdatedHide)				
+			log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
+			tRowBuffDetails.bHide[eTargetType] = bUpdatedHide
+			self:SetGridRowStatus(r, eTargetType, bUpdatedHide)				
 		end
 	end
 	
-	-- Also update the by-tooltip summary table to latest value
-	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = tBuffDetails.bHide
+	-- Also update the by-tooltip summary table to latest value	
+	BuffFilter.tBuffStatusByTooltip[strTooltip][eTargetType] = bUpdatedHide
 	
 	-- Force update
 	BuffFilter:OnTimer()
@@ -389,14 +402,13 @@ function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOl
 	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
 end
 
-function BuffFilter:SetGridRowStatus(nRow, bHide)
+function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
 	local grid = self.wndSettings:FindChild("Grid")	
 
-	if bHide == true then
-		grid:SetCellImage(nRow, 4, "achievements:sprAchievements_Icon_Complete")
-		grid:SetCellSortText(nRow, 4, "1")
-	else
-		grid:SetCellImage(nRow, 4, "")
-		grid:SetCellSortText(nRow, 4, "0")
-	end	
+	-- Determine column from target type. (TODO: add mapping table for this?)
+	local nColumn = eTargetType == eTargetTypes.Player and 4 or 5
+	
+	grid:SetCellImage(nRow, nColumn, bHide and "achievements:sprAchievements_Icon_Complete" or "")
+	grid:SetCellSortText(nRow, nColumn, bHide and "1" or "0")
 end
+
