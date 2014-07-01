@@ -29,6 +29,11 @@ function BuffFilter:OnInitialize()
 			eTargetType = eTargetTypes.Player, 
 			eBuffType = eBuffTypes.Buff
 		},			
+		TargetBeneBar = {
+			eTargetType = eTargetTypes.Target, 
+			eBuffType = eBuffTypes.Buff
+		},			
+
 		--PlayerHarmBar = {}, -- Not supported yet
 		--TargetBeneBar = {}, -- Not supported yet
 		--TargetHarmBar = {}, -- Not supported yet
@@ -245,7 +250,7 @@ end
 function BuffFilter.FindBarStockUI(strTargetType, strBuffType)	
 	return 
 		Apollo.GetAddon("TargetFrame")[strTargetType].wndMainClusterFrame:FindChild(strBuffType),
-		true -- safe to keep permanent reference
+		true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
 end
 
 -- PotatoUI-specific bar search
@@ -254,7 +259,7 @@ function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 		if frame.frameData.name == strTargetType then 
 			return 
 				frame.buffs:FindChild(strBuffType),
-				true -- safe to keep permanent reference
+				true -- TODO: test if safe to reuse
 		end
 	end
 end
