@@ -22,7 +22,6 @@ function BuffFilter:OnInitialize()
 	-- Tables for criss-cross references of buffs & tooltips. May be initialized & populated during OnRestore.
 	self.tBuffsById = self.tBuffsById or {}
 	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
-	self.tBarsToScan = self.tBarsToScan or {}
 
 	-- Configuration for supported bar types
 	self.tBars = {
@@ -147,9 +146,6 @@ function BuffFilter:OnDocLoaded()
 		self.tSavedData = nil
 	else
 		log:info("No saved config found. First run?")
-		
-		-- Default to scanning just the player bar
-		self.tBarsToScan.bPlayerBuffs = true		
 	end
 			
 	-- Fire scanner once and start timer
