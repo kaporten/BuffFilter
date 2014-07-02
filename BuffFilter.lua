@@ -76,7 +76,7 @@ function BuffFilter:OnInitialize()
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
 		},		
-		--SimpleBuffBar = ???,	-- SimpleBuffBar not supported (yet?
+		--SimpleBuffBar = ???,	-- SimpleBuffBar not supported (yet?)
 	}
 	
 	-- Stores permanent references to discovered bars, to avoid having 
@@ -90,7 +90,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.FATAL,
+		level = GeminiLogging.WARN,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -116,36 +116,9 @@ function BuffFilter:OnDocLoaded()
 	end
 		
 	-- Restore saved data
-	if self.tSavedData ~= nil and type(self.tSavedData) == "table" then
-		log:info("Loading saved configuration")
-		
-		-- Register buffs from savedata
-		if type(self.tSavedData.tKnownBuffs) == "table" then
-			for _,b in pairs(self.tSavedData.tKnownBuffs) do
-				BuffFilter:RegisterBuff(
-					b.nBaseSpellId,
-					b.strName,		
-					b.strTooltip,
-					b.strIcon,		
-					b.bIsBeneficial,
-					b.bHide[eTargetTypes.Player],
-					b.bHide[eTargetTypes.Target]
-				)
-			end			
-		end
-		
-		-- Restore interval timer setting			
-		if type(self.tSavedData.nTimer) == "number" then
-			self.wndSettings:FindChild("Slider"):SetValue(self.tSavedData.nTimer)
-		else
-			self.wndSettings:FindChild("Slider"):SetValue(3000)
-		end
-		self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", self.wndSettings:FindChild("Slider"):GetValue()/1000))
-		
-		-- Clear saved data object
-		self.tSavedData = nil
-	else
-		log:info("No saved config found. First run?")
+	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
+	if not bStatus then 
+		log:warn("Failed to restore all savedata: %s", message)
 	end
 			
 	-- Fire scanner once and start timer
@@ -301,7 +274,7 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType)
 	
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
-		log:warn("wndBuffBar input is nil")
+		log:warn("Unable to filter bar, wndBuffBar input is nil")
 		return
 	end
 	
@@ -408,6 +381,62 @@ function BuffFilter:OnRestore(eType, tSavedData)
 	-- Store saved data for later use 
 	-- (wait with registering buffs until addon/gui is fully initialized)
 	BuffFilter.tSavedData = tSavedData	
+end
+
+-- Actual use of table stored in OnRestore is postponed until addon is fully loaded.
+-- This func is called by On
+function BuffFilter:RestoreSaveData()
+	-- Assume OnRestore has placed actual save-data in self.tSavedData
+	if BuffFilter.tSavedData ~= nil and type(BuffFilter.tSavedData) == "table" then
+		log:info("Loading saved configuration")
+
+		-- Register buffs from savedata
+		if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
+			for id,b in pairs(BuffFilter.tSavedData.tKnownBuffs) do
+				local bStatus, message = pcall(BuffFilter.RestoreSaveDataBuff, id, b)
+				if not bStatus then
+					log:warn("Error loading settings for a buff: %s", message)
+				end
+			end			
+		end
+		
+		-- Restore interval timer setting			
+		if type(BuffFilter.tSavedData.nTimer) == "number" then
+			BuffFilter.wndSettings:FindChild("Slider"):SetValue(BuffFilter.tSavedData.nTimer)
+		else
+			BuffFilter.wndSettings:FindChild("Slider"):SetValue(3000)
+		end
+		BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.wndSettings:FindChild("Slider"):GetValue()/1000))
+		
+		-- Clear saved data object
+		BuffFilter.tSavedData = nil
+		
+	else
+		log:info("No saved config found. First run?")
+	end
+end
+
+function BuffFilter.RestoreSaveDataBuff(id, b)
+	-- Sanity check each individual field
+	if type(b.nBaseSpellId) ~= "number" then error(string.format("Saved buff Id %d is missing nBaseSpellId number", id)) end
+	if type(b.strName) ~= "string" then error(string.format("Saved buff Id %d is missing name string", id)) end
+	if type(b.strTooltip) ~= "string" then error(string.format("Saved buff Id %d is missing tooltip string", id)) end
+	if type(b.strIcon) ~= "string" then error(string.format("Saved buff Id %d is missing icon string", id)) end
+	if type(b.bIsBeneficial) ~= "boolean" then error(string.format("Saved buff Id %d is missing isBeneficial boolean", id)) end
+	if type(b.bHide) ~= "table" then error(string.format("Saved buff Id %d is missing bHide table", id)) end
+	if type(b.bHide[eTargetTypes.Player]) ~= "boolean" then error(string.format("Saved buff Id %d is missing bHide[Player] boolean", id)) end
+	if type(b.bHide[eTargetTypes.Target]) ~= "boolean" then error(string.format("Saved buff Id %d is missing bHide[Target] boolean", id)) end
+	
+	-- All good, now register buff
+	BuffFilter:RegisterBuff(
+		b.nBaseSpellId,
+		b.strName,		
+		b.strTooltip,
+		b.strIcon,		
+		b.bIsBeneficial,
+		b.bHide[eTargetTypes.Player],
+		b.bHide[eTargetTypes.Target]
+	)
 end
 
 
