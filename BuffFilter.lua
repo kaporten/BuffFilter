@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {1, 0, 2}
+BuffFilter.ADDON_VERSION = {1, 0, 3}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -196,7 +196,7 @@ function BuffFilter:GetBarsToFilter()
 										
 					-- Safe call for provider-specific discovery function
 					local bStatus, discoveryResult, bPermanent = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
-					if bStatus == true then
+					if bStatus == true and discoveryResult ~= nil then
 						log:info("Bar '%s' found for provider '%s'", strBar, strProvider)
 					
 						-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
@@ -238,6 +238,8 @@ function BuffFilter.FindBarStockUI(strTargetType, strBuffType)
 	local targetFrame = TF[strTargetType]
 	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)
 	
+	if bar == nil then return end
+	
 	-- If bar is found (ie., if above line of code didn't fail), check if we found a Target frame.
 	-- If so, hook into the stock "target changed" function for immediate updates
 	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
@@ -258,9 +260,12 @@ function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	local strSubframe = strBuffType == BuffFilter.tBarProviders["PotatoFrames"].tBuffType[eBuffTypes.Buff] and "buffs" or "debuffs"
 	
 	for _,frame in ipairs(Apollo.GetAddon("PotatoFrames").tFrames) do
-		if frame.frameData.name == strTargetType then 		
+		if frame.frameData.name == strTargetType then
+			local bar = frame[strSubframe]:FindChild(strBuffType)
+			if bar == nil then return end
+			
 			return 
-				frame[strSubframe]:FindChild(strBuffType),
+				bar,
 				true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
 		end
 	end
