@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {1, 0, 3}
+BuffFilter.ADDON_VERSION = {1, 1, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -52,7 +52,6 @@ function BuffFilter:OnInitialize()
 		["TargetFrame"] = {
 			fDiscoverBar = BuffFilter.FindBarStockUI,
 			fFilterBar = BuffFilter.FilterStockBar,
-			BuffFilter.FindBarStockUI,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaUnitFrame",
 				[eTargetTypes.Target] = "luaTargetFrame"
@@ -76,7 +75,20 @@ function BuffFilter:OnInitialize()
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
 		},		
-		--SimpleBuffBar = ???,	-- SimpleBuffBar not supported (yet?)
+		
+		--SimpleBuffBar
+		["SimpleBuffBar"] = {
+			fDiscoverBar = BuffFilter.FindBarSimpleBuffBarUI,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "Player",
+				[eTargetTypes.Target] = "Target"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BuffBar",
+				[eBuffTypes.Debuff] = "DebuffBar"
+			},
+		},
 	}
 	
 	-- Stores permanent references to discovered bars, to avoid having 
@@ -106,12 +118,12 @@ end
 function BuffFilter:OnDocLoaded()
 	-- Load settings form
 	if self.xmlDoc ~= nil and self.xmlDoc:IsLoaded() then
-	    self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
+		self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
 		if self.wndSettings == nil then
 			Apollo.AddAddonErrorText(self, "Could not load the Settings form.")
 			return
 		end		
-	    self.wndSettings:Show(false, true)
+		self.wndSettings:Show(false, true)
 		self.xmlDoc = nil
 	end
 		
@@ -231,8 +243,7 @@ end
 function BuffFilter.FindBarStockUI(strTargetType, strBuffType)	
 	local TF = Apollo.GetAddon("TargetFrame")
 	if TF == nil then 
-		error("Addon 'TargetFrame' not found. Replaced by custom unit frame addon?")
-		return
+		error("Addon 'TargetFrame' not found.")
 	end
 	
 	local targetFrame = TF[strTargetType]
@@ -244,6 +255,7 @@ function BuffFilter.FindBarStockUI(strTargetType, strBuffType)
 	-- If so, hook into the stock "target changed" function for immediate updates
 	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
 		if not H:IsHooked(TF, "OnTargetUnitChanged") then
+			log:info("Hooking TargetFrames.OnTargetUnitChanged")
 			H:RawHook(TF, "OnTargetUnitChanged", BuffFilter.TargetChangedStock)
 		end
 	end
@@ -251,24 +263,6 @@ function BuffFilter.FindBarStockUI(strTargetType, strBuffType)
 	return 
 		bar,
 		true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
-end
-
--- PotatoUI-specific bar search
-function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
-	-- PotatoUI stores the actual buff bar as a sub-element called "buffs" or "debuffs".
-	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".	
-	local strSubframe = strBuffType == BuffFilter.tBarProviders["PotatoFrames"].tBuffType[eBuffTypes.Buff] and "buffs" or "debuffs"
-	
-	for _,frame in ipairs(Apollo.GetAddon("PotatoFrames").tFrames) do
-		if frame.frameData.name == strTargetType then
-			local bar = frame[strSubframe]:FindChild(strBuffType)
-			if bar == nil then return end
-			
-			return 
-				bar,
-				true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
-		end
-	end
 end
 
 -- Function for filtering buffs from any stock buff-bar. 
@@ -315,6 +309,66 @@ function BuffFilter:TargetChangedStock(unitTarget)
 		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
 	end
 end
+
+-- PotatoUI-specific bar search
+function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
+	local PUI = Apollo.GetAddon("PotatoFrames")
+	if PUI == nil then
+		error("Addon 'PotatoFrames' not found.")
+	end
+
+	-- PotatoUI stores the actual buff bar as a sub-element called "buffs" or "debuffs".
+	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".	
+	local strSubframe = strBuffType == BuffFilter.tBarProviders["PotatoFrames"].tBuffType[eBuffTypes.Buff] and "buffs" or "debuffs"
+	
+	for _,frame in ipairs(PUI.tFrames) do
+		if frame.frameData.name == strTargetType then
+			local bar = frame[strSubframe]:FindChild(strBuffType)
+			if bar == nil then return end
+			
+			return 
+				bar,
+				true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
+		end
+	end
+end
+
+-- SimplebuffBar-specific bar search
+function BuffFilter.FindBarSimpleBuffBarUI(strTargetType, strBuffType)   
+	local SBB = Apollo.GetAddon("SimpleBuffBar")
+	if SBB == nil then
+		error("Addon 'SimpleBuffBar' not found.")
+	end
+	
+	local bar = SBB.bars[strTargetType .. strBuffType]   
+	if bar == nil then 
+		return 
+	end
+
+	-- SimpleBuffBar addon found, and bar could be dug out. Must be fully loaded then.
+	-- Hook into OnTargetUnitChanged for immediate filter-updates.
+	if not H:IsHooked(SBB, "OnTargetUnitChanged") then
+		log:info("Hooking SimpleBuffBar.OnTargetUnitChanged")
+		H:RawHook(SBB, "OnTargetUnitChanged", BuffFilter.TargetChangedSimpleBuffBar)
+	end
+	
+	return
+		bar,
+		true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
+end
+
+function BuffFilter:TargetChangedSimpleBuffBar(unitTarget)
+	log:info("SimpleBuffBar change intercepted")
+	
+	-- First, pass call to the real TargetFrame addon
+	local SBB = Apollo.GetAddon("SimpleBuffBar")	
+	H.hooks[SBB].OnTargetUnitChanged(SBB, unitTarget)
+
+	if unitTarget ~= nil then
+		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
+	end
+end
+
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
 function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHidePlayer, bHideTarget)	
@@ -498,7 +552,7 @@ function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
 	-- Determine column from target type. (TODO: add mapping table for this?)
 	local nColumn = eTargetType == eTargetTypes.Player and 4 or 5
 	
-	grid:SetCellImage(nRow, nColumn, bHide and "achievements:sprAchievements_Icon_Complete" or "")
+	grid:SetCellImage(nRow, nColumn, bHide and "IconSprites:Icon_Windows_UI_CRB_Marker_Ghost" or "")
 	grid:SetCellSortText(nRow, nColumn, bHide and "1" or "0")
 end
 
