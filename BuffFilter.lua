@@ -170,9 +170,9 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	log:debug("BuffFilter timer")
+	--log:debug("BuffFilter timer")
 	local tBarsToFilter = BuffFilter:GetBarsToFilter()
-	log:debug("%d bars to scan identified", #tBarsToFilter)
+	--log:debug("%d bars to scan identified", #tBarsToFilter)
 	
 	for _,b in ipairs(tBarsToFilter) do		
 		-- Call provider-specific filter function.
@@ -196,16 +196,16 @@ function BuffFilter:GetBarsToFilter()
 					local strBuffTypeParam = tProviderDetails.tBuffType[eBuffType]
 					
 					if strBarTypeParam == nil or strBuffTypeParam == nil then
-						log:debug("Provider '%s' does not support bar type '%s', buff type '%s'. Skipping.", strProvider, eTargetType, eBuffType)
+						--log:debug("Provider '%s' does not support bar type '%s', buff type '%s'. Skipping.", strProvider, eTargetType, eBuffType)
 						break
 					end
 					
-					log:debug("Scanning for %s/%s-bar on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", eTargetType, eBuffType, strProvider, strBarTypeParam, strBuffTypeParam)
+					--log:debug("Scanning for %s/%s-bar on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", eTargetType, eBuffType, strProvider, strBarTypeParam, strBuffTypeParam)
 										
 					-- Safe call for provider-specific discovery function
 					local bStatus, discoveryResult = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
 					if bStatus == true and discoveryResult ~= nil then
-						log:debug("%s/%s-bar found for provider '%s'", eTargetType, eBuffType, strProvider)
+						--log:debug("%s/%s-bar found for provider '%s'", eTargetType, eBuffType, strProvider)
 					
 						-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
 						local tFoundBar = {
@@ -218,7 +218,7 @@ function BuffFilter:GetBarsToFilter()
 						-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
 						result[#result+1] = tFoundBar
 					else
-						log:debug("Unable to locate %s/%s-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
+						--log:debug("Unable to locate %s/%s-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
 					end
 				end
 			end
@@ -257,7 +257,7 @@ end
 -- This function does not distinguish between buff and debuff-bars, since
 -- they are the same kind of monster, just with different flags.
 function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
-	log:debug("Filtering stock %s/%s-bar", eTargetType, eBuffType)
+	--log:debug("Filtering stock %s/%s-bar", eTargetType, eBuffType)
 	
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
@@ -353,7 +353,7 @@ end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
 function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)
-	log:debug("RegisterBuff called")
+	--log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
 		-- Buff already known, do nothing
@@ -560,12 +560,3 @@ function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
 	grid:SetCellImage(nRow, nColumn, bHide and "IconSprites:Icon_Windows_UI_CRB_Marker_Ghost" or "")
 	grid:SetCellSortText(nRow, nColumn, bHide and "1" or "0")
 end
-
-
----------------------------------------------------------------------------------------------------
--- SettingsForm Functions
----------------------------------------------------------------------------------------------------
-function BuffFilter:OnGenerateTooltip( wndHandler, wndControl, eToolTipType, x, y )
-	log:info("Test, x=%d, y=%d", x, y)
-end
-
