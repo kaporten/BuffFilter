@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {1, 1, 0}
+BuffFilter.ADDON_VERSION = {1, 2, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -90,11 +90,6 @@ function BuffFilter:OnInitialize()
 			},
 		},
 	}
-	
-	-- Stores permanent references to discovered bars, to avoid having 
-	-- to re-search on every timer pass. Key is tBars-value (f.ex "PlayerBeneBar"),
-	-- value is the "tFoundBar" structure created in GetBarsToFilter()
-	self.tBarStorage = {}
 end
 
 function BuffFilter:OnEnable()	
@@ -108,7 +103,7 @@ function BuffFilter:OnEnable()
 	})
 
 	BuffFilter.log = log -- store ref for GeminiConsole-access to loglevel
-	log:info("Initializing addon 'BuffFilter'")
+	--log:info("Initializing addon 'BuffFilter'")
 	
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
@@ -193,44 +188,39 @@ function BuffFilter:GetBarsToFilter()
 
 	-- Identify all bars to filter
 	for strBar, tBar in pairs(BuffFilter.tBars) do
-		if BuffFilter.tBarStorage[strBar] ~= nil then
-			-- Bar previously identified / permanent, no need to search for it.
-			result[#result+1] = BuffFilter.tBarStorage[strBar]
-		else
-			-- Bar not previously identified, or is not permanent.
-			-- Call each provider-specific function to scan for the bar
-			for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do				
-				if tProviderDetails.fDiscoverBar ~= nil then
-					-- Translate bar target/bufftype properties to provider specific values
-					local strBarTypeParam = tProviderDetails.tTargetType[tBar.eTargetType]
-					local strBuffTypeParam = tProviderDetails.tBuffType[tBar.eBuffType]
-					--log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
-										
-					-- Safe call for provider-specific discovery function
-					local bStatus, discoveryResult, bPermanent = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
-					if bStatus == true and discoveryResult ~= nil then
-						log:info("Bar '%s' found for provider '%s'", strBar, strProvider)
+		-- Bar not previously identified, or is not permanent.
+		-- Call each provider-specific function to scan for the bar
+		for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do				
+			if tProviderDetails.fDiscoverBar ~= nil then
+				-- Translate bar target/bufftype properties to provider specific values
+				local strBarTypeParam = tProviderDetails.tTargetType[tBar.eTargetType]
+				local strBuffTypeParam = tProviderDetails.tBuffType[tBar.eBuffType]
+				--log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
+									
+				-- Safe call for provider-specific discovery function
+				local bStatus, discoveryResult, bPermanent = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
+				if bStatus == true and discoveryResult ~= nil then
+					--log:info("Bar '%s' found for provider '%s'", strBar, strProvider)
+				
+					-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
+					local tFoundBar = {
+						tBar = tBar,								-- Bar config we found a hit for
+						fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
+						bar = discoveryResult,						-- Reference to actual bar instance							
+					}
 					
-						-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
-						local tFoundBar = {
-							tBar = tBar,								-- Bar config we found a hit for
-							fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
-							bar = discoveryResult,						-- Reference to actual bar instance							
-						}
-						
-						-- Provider allows permanent ref-storage?
-						if bPermanent == true then							
-							BuffFilter.tBarStorage[strBar] = tFoundBar
-						end
-						
-						-- Add found bar to result and break innermost (provider) for-loop
-						result[#result+1] = tFoundBar
-						break
-					else
-						-- This is expected to occur, since provider-scanning is not 
-						-- sorted by known providers (TODO?), but just checked one at a time
-						log:info("Unable to locate bar '%s' for provider '%s':\n%s", strBar, strProvider, discoveryResult)
+					-- Provider allows permanent ref-storage?
+					if bPermanent == true then							
+						BuffFilter.tBarStorage[strBar] = tFoundBar
 					end
+					
+					-- Add found bar to result. Keep scanning, more providers may be active at the same time, for the same bar
+					-- (f.ex. PotatoUI + SimpleBuffBar)
+					result[#result+1] = tFoundBar
+				else
+					-- This is expected to occur, since provider-scanning is not 
+					-- sorted by known providers (TODO?), but just checked one at a time
+					--log:info("Unable to locate bar '%s' for provider '%s':\n%s", strBar, strProvider, tostring(discoveryResult))
 				end
 			end
 		end
@@ -242,27 +232,22 @@ end
 -- Stock UI-specific bar search
 function BuffFilter.FindBarStockUI(strTargetType, strBuffType)	
 	local TF = Apollo.GetAddon("TargetFrame")
-	if TF == nil then 
-		error("Addon 'TargetFrame' not found.")
-	end
+	if TF == nil then return end	
 	
 	local targetFrame = TF[strTargetType]
-	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)
-	
+	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)	
 	if bar == nil then return end
-	
-	-- If bar is found (ie., if above line of code didn't fail), check if we found a Target frame.
+
+	-- If bar is found (ie., if above lines of code didn't fail or return), check if we found a Target frame.
 	-- If so, hook into the stock "target changed" function for immediate updates
 	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
 		if not H:IsHooked(TF, "OnTargetUnitChanged") then
-			log:info("Hooking TargetFrames.OnTargetUnitChanged")
+			--log:info("Hooking TargetFrames.OnTargetUnitChanged")
 			H:RawHook(TF, "OnTargetUnitChanged", BuffFilter.TargetChangedStock)
 		end
 	end
 	
-	return 
-		bar,
-		true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
+	return bar
 end
 
 -- Function for filtering buffs from any stock buff-bar. 
@@ -293,7 +278,7 @@ end
 
 -- Called when the target changes. Setup is done in the stock bar discovery function "FindBarStockUI"
 function BuffFilter:TargetChangedStock(unitTarget)
-	log:info("Stock Target change intercepted")
+	--log:info("Stock Target change intercepted")
 	
 	-- First, pass call to the real TargetFrame addon
 	local TF = Apollo.GetAddon("TargetFrame")	
@@ -313,9 +298,7 @@ end
 -- PotatoUI-specific bar search
 function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	local PUI = Apollo.GetAddon("PotatoFrames")
-	if PUI == nil then
-		error("Addon 'PotatoFrames' not found.")
-	end
+	if PUI == nil then return end
 
 	-- PotatoUI stores the actual buff bar as a sub-element called "buffs" or "debuffs".
 	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".	
@@ -323,12 +306,7 @@ function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	
 	for _,frame in ipairs(PUI.tFrames) do
 		if frame.frameData.name == strTargetType then
-			local bar = frame[strSubframe]:FindChild(strBuffType)
-			if bar == nil then return end
-			
-			return 
-				bar,
-				true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
+			return frame[strSubframe]:FindChild(strBuffType)
 		end
 	end
 end
@@ -336,29 +314,23 @@ end
 -- SimplebuffBar-specific bar search
 function BuffFilter.FindBarSimpleBuffBarUI(strTargetType, strBuffType)   
 	local SBB = Apollo.GetAddon("SimpleBuffBar")
-	if SBB == nil then
-		error("Addon 'SimpleBuffBar' not found.")
-	end
+	if SBB == nil then return end
 	
 	local bar = SBB.bars[strTargetType .. strBuffType]   
-	if bar == nil then 
-		return 
-	end
+	if bar == nil then return end
 
 	-- SimpleBuffBar addon found, and bar could be dug out. Must be fully loaded then.
 	-- Hook into OnTargetUnitChanged for immediate filter-updates.
 	if not H:IsHooked(SBB, "OnTargetUnitChanged") then
-		log:info("Hooking SimpleBuffBar.OnTargetUnitChanged")
+		--log:info("Hooking SimpleBuffBar.OnTargetUnitChanged")
 		H:RawHook(SBB, "OnTargetUnitChanged", BuffFilter.TargetChangedSimpleBuffBar)
 	end
 	
-	return
-		bar,
-		true -- Safe to keep permanent ref, bar is reused when changing target (only buffs on it change)
+	return bar
 end
 
 function BuffFilter:TargetChangedSimpleBuffBar(unitTarget)
-	log:info("SimpleBuffBar change intercepted")
+	--log:info("SimpleBuffBar change intercepted")
 	
 	-- First, pass call to the real TargetFrame addon
 	local SBB = Apollo.GetAddon("SimpleBuffBar")	
@@ -379,7 +351,7 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		return
 	end
 	
-	log:info("Registering buff: '%s'", strName)
+	--log:info("Registering buff: '%s'", strName)
 	
 	-- Construct buff details table
 	local tBuffDetails =  {
@@ -447,7 +419,7 @@ end
 function BuffFilter:RestoreSaveData()
 	-- Assume OnRestore has placed actual save-data in self.tSavedData
 	if BuffFilter.tSavedData ~= nil and type(BuffFilter.tSavedData) == "table" then
-		log:info("Loading saved configuration")
+		--log:info("Loading saved configuration")
 
 		-- Register buffs from savedata
 		if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
@@ -471,7 +443,7 @@ function BuffFilter:RestoreSaveData()
 		BuffFilter.tSavedData = nil
 		
 	else
-		log:info("No saved config found. First run?")
+		--log:info("No saved config found. First run?")
 	end
 end
 
@@ -527,7 +499,7 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 			
 		-- Check if this buff has same tooltip
 		if tRowBuffDetails.strTooltip == strTooltip then
-			log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
+			--log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
 			tRowBuffDetails.bHide[eTargetType] = bUpdatedHide
 			self:SetGridRowStatus(r, eTargetType, bUpdatedHide)				
 		end
