@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {1, 3, 0}
+BuffFilter.ADDON_VERSION = {1, 4, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -188,37 +188,41 @@ function BuffFilter:GetBarsToFilter()
 	-- For every provider/target/bufftype combination,
 	-- call each provider-specific function to scan for the bar
 	for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do
-		for _,eTargetType in pairs(eTargetTypes) do
-			for _,eBuffType in pairs(eBuffTypes) do		
-				if tProviderDetails.fDiscoverBar ~= nil then
-					-- Translate bar target/bufftype properties to provider specific values
-					local strBarTypeParam = tProviderDetails.tTargetType[eTargetType]
-					local strBuffTypeParam = tProviderDetails.tBuffType[eBuffType]
-					
-					if strBarTypeParam == nil or strBuffTypeParam == nil then
-						--log:debug("Provider '%s' does not support bar type '%s', buff type '%s'. Skipping.", strProvider, eTargetType, eBuffType)
-						break
-					end
-					
-					--log:debug("Scanning for %s/%s-bar on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", eTargetType, eBuffType, strProvider, strBarTypeParam, strBuffTypeParam)
-										
-					-- Safe call for provider-specific discovery function
-					local bStatus, discoveryResult = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
-					if bStatus == true and discoveryResult ~= nil then
-						--log:debug("%s/%s-bar found for provider '%s'", eTargetType, eBuffType, strProvider)
-					
-						-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
-						local tFoundBar = {
-							eTargetType = eTargetType,					-- Target-type (Player, Target, Focus etc)
-							eBuffType = eBuffType,						-- Buff type (Buffs or Debuffs)
-							fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
-							bar = discoveryResult,						-- Reference to actual bar instance							
-						}
+		if Apollo.GetAddon(strProvider) == nil then
+			--log:debug("Provider '%s' not found, skipping.", strProvider)
+		else
+			for _,eTargetType in pairs(eTargetTypes) do
+				for _,eBuffType in pairs(eBuffTypes) do		
+					if tProviderDetails.fDiscoverBar ~= nil then
+						-- Translate bar target/bufftype properties to provider specific values
+						local strBarTypeParam = tProviderDetails.tTargetType[eTargetType]
+						local strBuffTypeParam = tProviderDetails.tBuffType[eBuffType]
+						
+						if strBarTypeParam == nil or strBuffTypeParam == nil then
+							--log:debug("Provider '%s' does not support bar type '%s', buff type '%s'. Skipping.", strProvider, eTargetType, eBuffType)
+							break
+						end
+						
+						--log:debug("Scanning for %s/%s-bar on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", eTargetType, eBuffType, strProvider, strBarTypeParam, strBuffTypeParam)
 											
-						-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
-						result[#result+1] = tFoundBar
-					else
-						--log:debug("Unable to locate %s/%s-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
+						-- Safe call for provider-specific discovery function
+						local bStatus, discoveryResult = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
+						if bStatus == true and discoveryResult ~= nil then
+							--log:debug("%s/%s-bar found for provider '%s'", eTargetType, eBuffType, strProvider)
+						
+							-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
+							local tFoundBar = {
+								eTargetType = eTargetType,					-- Target-type (Player, Target, Focus etc)
+								eBuffType = eBuffType,						-- Buff type (Buffs or Debuffs)
+								fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
+								bar = discoveryResult,						-- Reference to actual bar instance							
+							}
+												
+							-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
+							result[#result+1] = tFoundBar
+						else
+							--log:debug("Unable to locate %s/%s-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
+						end
 					end
 				end
 			end
