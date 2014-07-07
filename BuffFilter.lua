@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {1, 2, 0}
+BuffFilter.ADDON_VERSION = {1, 3, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -11,7 +11,9 @@ local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
 	Player = "Player",
-	Target = "Target"
+	Target = "Target",
+	Focus = "Focus",
+	TargetOfTarget = "TargetOfTarget"
 }
 local eBuffTypes = {
 	Buff = "Buff",
@@ -22,29 +24,6 @@ function BuffFilter:OnInitialize()
 	-- Tables for criss-cross references of buffs & tooltips. May be initialized & populated during OnRestore.
 	self.tBuffsById = self.tBuffsById or {}
 	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
-
-	-- Configuration for supported bar types
-	self.tBars = {
-		-- Player buff / debuff bar
-		PlayerBeneBar = {
-			eTargetType = eTargetTypes.Player, 
-			eBuffType = eBuffTypes.Buff
-		},			
-		PlayerHarmBar = {
-			eTargetType = eTargetTypes.Player, 
-			eBuffType = eBuffTypes.Debuff
-		},			
-
-		-- Target buff / debuff bar
-		TargetBeneBar = {
-			eTargetType = eTargetTypes.Target, 
-			eBuffType = eBuffTypes.Buff
-		},			
-		TargetHarmBar = {
-			eTargetType = eTargetTypes.Target, 
-			eBuffType = eBuffTypes.Debuff
-		},
-	}
 	
 	-- Configuration for supported bar providers (Addons). Key must match actual Addon name.
 	self.tBarProviders = {
@@ -54,7 +33,8 @@ function BuffFilter:OnInitialize()
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaUnitFrame",
-				[eTargetTypes.Target] = "luaTargetFrame"
+				[eTargetTypes.Target] = "luaTargetFrame",
+				[eTargetTypes.Focus] = "luaFocusFrame"
 			},
 			tBuffType = {
 				[eBuffTypes.Buff] = "BeneBuffBar",
@@ -68,7 +48,9 @@ function BuffFilter:OnInitialize()
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "Player Frame",
-				[eTargetTypes.Target] = "Target Frame"
+				[eTargetTypes.Target] = "Target Frame",
+				[eTargetTypes.Focus] = "Focus Frame",
+				[eTargetTypes.TargetOfTarget] = "ToT Frame"
 			},
 			tBuffType = {
 				[eBuffTypes.Buff] = "BeneBuffBar",
@@ -82,7 +64,8 @@ function BuffFilter:OnInitialize()
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "Player",
-				[eTargetTypes.Target] = "Target"
+				[eTargetTypes.Target] = "Target",
+				[eTargetTypes.Focus] = "Focus"
 			},
 			tBuffType = {
 				[eBuffTypes.Buff] = "BuffBar",
@@ -90,6 +73,18 @@ function BuffFilter:OnInitialize()
 			},
 		},
 	}
+	
+	-- Mapping tables for the Grids column-to-targettype translation
+	self.tTargetToColumn = {
+		[eTargetTypes.Player] = 4,
+		[eTargetTypes.Target] = 5,
+		[eTargetTypes.Focus] = 6,
+		[eTargetTypes.TargetOfTarget] = 7,
+	}
+	-- Reverse map tTargetToColumn
+	self.tColumnToTarget = {}
+	for k,v in pairs(self.tTargetToColumn) do self.tColumnToTarget[v] = k end
+	
 end
 
 function BuffFilter:OnEnable()	
@@ -103,7 +98,7 @@ function BuffFilter:OnEnable()
 	})
 
 	BuffFilter.log = log -- store ref for GeminiConsole-access to loglevel
-	--log:info("Initializing addon 'BuffFilter'")
+	log:info("Initializing addon 'BuffFilter'")
 	
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
@@ -161,8 +156,12 @@ function BuffFilter:HookBuffTooltipGeneration()
 			wndParent:GetBuffTooltip(),
 			splSource:GetIcon(),		
 			splSource:IsBeneficial(),
-			false,
-			false)
+			{	
+				[eTargetTypes.Player] = false,
+				[eTargetTypes.Target] = false,
+				[eTargetTypes.Focus] = false,
+				[eTargetTypes.TargetOfTarget] = false
+			})
 
 		-- Return generated tooltip to client addon
 		return wndTooltip
@@ -171,56 +170,56 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
-	--log:debug("BuffFilter timer")
+	log:debug("BuffFilter timer")
 	local tBarsToFilter = BuffFilter:GetBarsToFilter()
-	--log:debug("%d bars to scan identified", #tBarsToFilter)
+	log:debug("%d bars to scan identified", #tBarsToFilter)
 	
 	for _,b in ipairs(tBarsToFilter) do		
 		-- Call provider-specific filter function.
 		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
-		b.fFilterBar(b.bar, b.tBar.eTargetType)
+		b.fFilterBar(b.bar, b.eTargetType, b.eBuffType)
 	end
 end
 
---
+-- Based on config for bars / providers, attempt to locate all buffbars on the GUIs.
 function BuffFilter:GetBarsToFilter()
 	local result = {}
 
-	-- Identify all bars to filter
-	for strBar, tBar in pairs(BuffFilter.tBars) do
-		-- Bar not previously identified, or is not permanent.
-		-- Call each provider-specific function to scan for the bar
-		for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do				
-			if tProviderDetails.fDiscoverBar ~= nil then
-				-- Translate bar target/bufftype properties to provider specific values
-				local strBarTypeParam = tProviderDetails.tTargetType[tBar.eTargetType]
-				local strBuffTypeParam = tProviderDetails.tBuffType[tBar.eBuffType]
-				--log:debug("Scanning for bar type %s on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", strBar, strProvider, strBarTypeParam, strBuffTypeParam)
-									
-				-- Safe call for provider-specific discovery function
-				local bStatus, discoveryResult, bPermanent = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
-				if bStatus == true and discoveryResult ~= nil then
-					--log:info("Bar '%s' found for provider '%s'", strBar, strProvider)
-				
-					-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
-					local tFoundBar = {
-						tBar = tBar,								-- Bar config we found a hit for
-						fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
-						bar = discoveryResult,						-- Reference to actual bar instance							
-					}
+	-- For every provider/target/bufftype combination,
+	-- call each provider-specific function to scan for the bar
+	for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do
+		for _,eTargetType in pairs(eTargetTypes) do
+			for _,eBuffType in pairs(eBuffTypes) do		
+				if tProviderDetails.fDiscoverBar ~= nil then
+					-- Translate bar target/bufftype properties to provider specific values
+					local strBarTypeParam = tProviderDetails.tTargetType[eTargetType]
+					local strBuffTypeParam = tProviderDetails.tBuffType[eBuffType]
 					
-					-- Provider allows permanent ref-storage?
-					if bPermanent == true then							
-						BuffFilter.tBarStorage[strBar] = tFoundBar
+					if strBarTypeParam == nil or strBuffTypeParam == nil then
+						log:debug("Provider '%s' does not support bar type '%s', buff type '%s'. Skipping.", strProvider, eTargetType, eBuffType)
+						break
 					end
 					
-					-- Add found bar to result. Keep scanning, more providers may be active at the same time, for the same bar
-					-- (f.ex. PotatoUI + SimpleBuffBar)
-					result[#result+1] = tFoundBar
-				else
-					-- This is expected to occur, since provider-scanning is not 
-					-- sorted by known providers (TODO?), but just checked one at a time
-					--log:info("Unable to locate bar '%s' for provider '%s':\n%s", strBar, strProvider, tostring(discoveryResult))
+					log:debug("Scanning for %s/%s-bar on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", eTargetType, eBuffType, strProvider, strBarTypeParam, strBuffTypeParam)
+										
+					-- Safe call for provider-specific discovery function
+					local bStatus, discoveryResult = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
+					if bStatus == true and discoveryResult ~= nil then
+						log:debug("%s/%s-bar found for provider '%s'", eTargetType, eBuffType, strProvider)
+					
+						-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
+						local tFoundBar = {
+							eTargetType = eTargetType,					-- Target-type (Player, Target, Focus etc)
+							eBuffType = eBuffType,						-- Buff type (Buffs or Debuffs)
+							fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
+							bar = discoveryResult,						-- Reference to actual bar instance							
+						}
+											
+						-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
+						result[#result+1] = tFoundBar
+					else
+						log:debug("Unable to locate %s/%s-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
+					end
 				end
 			end
 		end
@@ -232,17 +231,21 @@ end
 -- Stock UI-specific bar search
 function BuffFilter.FindBarStockUI(strTargetType, strBuffType)	
 	local TF = Apollo.GetAddon("TargetFrame")
-	if TF == nil then return end	
+	if TF == nil then 
+		error("Addon 'TargetFrame' not found")
+	end	
 	
 	local targetFrame = TF[strTargetType]
 	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)	
-	if bar == nil then return end
+	if bar == nil then 
+		error("Bar not found")
+	end	
 
 	-- If bar is found (ie., if above lines of code didn't fail or return), check if we found a Target frame.
 	-- If so, hook into the stock "target changed" function for immediate updates
 	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
 		if not H:IsHooked(TF, "OnTargetUnitChanged") then
-			--log:info("Hooking TargetFrames.OnTargetUnitChanged")
+			log:info("Hooking TargetFrames.OnTargetUnitChanged")
 			H:RawHook(TF, "OnTargetUnitChanged", BuffFilter.TargetChangedStock)
 		end
 	end
@@ -253,8 +256,8 @@ end
 -- Function for filtering buffs from any stock buff-bar. 
 -- This function does not distinguish between buff and debuff-bars, since
 -- they are the same kind of monster, just with different flags.
-function BuffFilter.FilterStockBar(wndBuffBar, eTargetType)
-	--log:debug("Filtering buffs on stock %s-bar", eTargetType)
+function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
+	log:debug("Filtering stock %s/%s-bar", eTargetType, eBuffType)
 	
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
@@ -278,7 +281,7 @@ end
 
 -- Called when the target changes. Setup is done in the stock bar discovery function "FindBarStockUI"
 function BuffFilter:TargetChangedStock(unitTarget)
-	--log:info("Stock Target change intercepted")
+	log:info("Stock Target change intercepted")
 	
 	-- First, pass call to the real TargetFrame addon
 	local TF = Apollo.GetAddon("TargetFrame")	
@@ -298,7 +301,9 @@ end
 -- PotatoUI-specific bar search
 function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	local PUI = Apollo.GetAddon("PotatoFrames")
-	if PUI == nil then return end
+	if PUI == nil then 
+		error("Addon 'PotatoFrames' not installed")
+	end
 
 	-- PotatoUI stores the actual buff bar as a sub-element called "buffs" or "debuffs".
 	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".	
@@ -314,15 +319,19 @@ end
 -- SimplebuffBar-specific bar search
 function BuffFilter.FindBarSimpleBuffBarUI(strTargetType, strBuffType)   
 	local SBB = Apollo.GetAddon("SimpleBuffBar")
-	if SBB == nil then return end
+	if SBB == nil then 
+		error("Addon 'SimpleBuffBar' not installed")
+	end
 	
 	local bar = SBB.bars[strTargetType .. strBuffType]   
-	if bar == nil then return end
+	if bar == nil then 
+		error("Bar not found")
+	end
 
 	-- SimpleBuffBar addon found, and bar could be dug out. Must be fully loaded then.
 	-- Hook into OnTargetUnitChanged for immediate filter-updates.
 	if not H:IsHooked(SBB, "OnTargetUnitChanged") then
-		--log:info("Hooking SimpleBuffBar.OnTargetUnitChanged")
+		log:info("Hooking SimpleBuffBar.OnTargetUnitChanged")
 		H:RawHook(SBB, "OnTargetUnitChanged", BuffFilter.TargetChangedSimpleBuffBar)
 	end
 	
@@ -330,7 +339,7 @@ function BuffFilter.FindBarSimpleBuffBarUI(strTargetType, strBuffType)
 end
 
 function BuffFilter:TargetChangedSimpleBuffBar(unitTarget)
-	--log:info("SimpleBuffBar change intercepted")
+	log:info("SimpleBuffBar change intercepted")
 	
 	-- First, pass call to the real TargetFrame addon
 	local SBB = Apollo.GetAddon("SimpleBuffBar")	
@@ -343,15 +352,15 @@ end
 
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
-function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHidePlayer, bHideTarget)	
-	--log:debug("RegisterBuff called")
+function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)
+	log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
 		-- Buff already known, do nothing
 		return
 	end
 	
-	--log:info("Registering buff: '%s'", strName)
+	log:info("Registering buff: '%s'", strName)
 	
 	-- Construct buff details table
 	local tBuffDetails =  {
@@ -360,20 +369,11 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		strTooltip = strTooltip,
 		strIcon = strIcon,		
 		bIsBeneficial = bIsBeneficial,
-		bHide = {
-			[eTargetTypes.Player] = bHidePlayer,
-			[eTargetTypes.Target] = bHideTarget
-		}
+		bHide = bHide
 	}
 	
 	-- Add to byId table
 	BuffFilter.tBuffsById[tBuffDetails.nBaseSpellId] = tBuffDetails
-
-	-- Update summarized show/hide status for this tooltip. Any existing hide=true is preserved.
-	local tTTStatus = BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] or {}
-	tTTStatus[eTargetTypes.Player] = tTTStatus[eTargetTypes.Player] or bHidePlayer
-	tTTStatus[eTargetTypes.Target] = tTTStatus[eTargetTypes.Target] or bHideTarget
-	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = tTTStatus
 	
 	-- Add buff to Settings window grid
 	local grid = self.wndSettings:FindChild("Grid")
@@ -382,8 +382,18 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")--tBuffDetails.bIsBeneficial and "1" or "0")
 	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
 	grid:SetCellText(nRow, 3, tBuffDetails.strName)	
-	BuffFilter:SetGridRowStatus(nRow, eTargetTypes.Player, bHidePlayer)
-	BuffFilter:SetGridRowStatus(nRow, eTargetTypes.Target, bHideTarget)
+	
+	-- Update tooltip summary status for buff
+	local tTTStatus = BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] or {}
+	for k,v in pairs(bHide) do
+		tTTStatus[k] = tTTStatus[k] or v
+		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = tTTStatus
+	end
+
+	-- Update settings gui grid
+	for k,v in pairs(bHide) do
+		BuffFilter:SetGridRowStatus(nRow, k, v)
+	end
 end
 
 
@@ -419,7 +429,7 @@ end
 function BuffFilter:RestoreSaveData()
 	-- Assume OnRestore has placed actual save-data in self.tSavedData
 	if BuffFilter.tSavedData ~= nil and type(BuffFilter.tSavedData) == "table" then
-		--log:info("Loading saved configuration")
+		log:info("Loading saved configuration")
 
 		-- Register buffs from savedata
 		if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
@@ -443,7 +453,7 @@ function BuffFilter:RestoreSaveData()
 		BuffFilter.tSavedData = nil
 		
 	else
-		--log:info("No saved config found. First run?")
+		log:info("No saved config found. First run?")
 	end
 end
 
@@ -458,6 +468,15 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 	if type(b.bHide[eTargetTypes.Player]) ~= "boolean" then error(string.format("Saved buff Id %d is missing bHide[Player] boolean", id)) end
 	if type(b.bHide[eTargetTypes.Target]) ~= "boolean" then error(string.format("Saved buff Id %d is missing bHide[Target] boolean", id)) end
 	
+	-- Focus is a new property, so it may be missing. Default-set it to the Target-hide value.
+	if type(b.bHide[eTargetTypes.Focus]) ~= "boolean" then 
+		b.bHide[eTargetTypes.Focus] = b.bHide[eTargetTypes.Target]
+	end	
+	-- TargetOfTarget is a new property, so it may be missing. Default-set it to the Target-hide value.
+	if type(b.bHide[eTargetTypes.TargetOfTarget]) ~= "boolean" then 
+		b.bHide[eTargetTypes.TargetOfTarget] = b.bHide[eTargetTypes.Target]
+	end	
+	
 	-- All good, now register buff
 	BuffFilter:RegisterBuff(
 		b.nBaseSpellId,
@@ -465,8 +484,12 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 		b.strTooltip,
 		b.strIcon,		
 		b.bIsBeneficial,
-		b.bHide[eTargetTypes.Player],
-		b.bHide[eTargetTypes.Target]
+		{	
+			[eTargetTypes.Player] = b.bHide[eTargetTypes.Player],
+			[eTargetTypes.Target] = b.bHide[eTargetTypes.Target],
+			[eTargetTypes.Focus] = b.bHide[eTargetTypes.Focus],
+			[eTargetTypes.TargetOfTarget] = b.bHide[eTargetTypes.TargetOfTarget]
+		}
 	)
 end
 
@@ -486,27 +509,37 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	local tBuffDetails = grid:GetCellData(nRow, 1)
 	local strTooltip = tBuffDetails.strTooltip
 
-	-- Determine if the Player or Target column was clicked
-	local eTargetType = nColumn == 4 and eTargetTypes.Player or eTargetTypes.Target
-	
-	-- Toggled hide boolean for this target type
-	local bUpdatedHide = not tBuffDetails.bHide[eTargetType]
-	
-	-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
-	for r = 1, grid:GetRowCount() do -- for every row on the grid
-		-- Get buff for this row
-		local tRowBuffDetails = grid:GetCellData(r, 1)
-			
-		-- Check if this buff has same tooltip
-		if tRowBuffDetails.strTooltip == strTooltip then
-			--log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
-			tRowBuffDetails.bHide[eTargetType] = bUpdatedHide
-			self:SetGridRowStatus(r, eTargetType, bUpdatedHide)				
+	-- Determine which column was clicked
+	local eTargetType = self.tColumnToTarget[nColumn]
+	if eTargetType ~= nil then -- Individual target-type column clicked
+		-- Toggled hide boolean for this target type
+		local bUpdatedHide = not tBuffDetails.bHide[eTargetType]
+		
+		-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
+		for r = 1, grid:GetRowCount() do -- for every row on the grid
+			-- Get buff for this row
+			local tRowBuffDetails = grid:GetCellData(r, 1)
+				
+			-- Check if this buff has same tooltip
+			if tRowBuffDetails.strTooltip == strTooltip then
+				log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
+				tRowBuffDetails.bHide[eTargetType] = bUpdatedHide
+				self:SetGridRowStatus(r, eTargetType, bUpdatedHide)				
+			end
+		end
+		
+		-- Also update the by-tooltip summary table to latest value	
+		BuffFilter.tBuffStatusByTooltip[strTooltip][eTargetType] = bUpdatedHide
+	else
+		if nColumn == 3 then
+			log:info("Toggling buff '%s' for all target types", tBuffDetails.strName)
+			-- Clicking name inverses all column selections
+			-- Do this the easy way - by simulating user input on each column
+			for t,c in pairs(self.tTargetToColumn) do
+				BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, c)
+			end			
 		end
 	end
-	
-	-- Also update the by-tooltip summary table to latest value	
-	BuffFilter.tBuffStatusByTooltip[strTooltip][eTargetType] = bUpdatedHide
 	
 	-- Force update
 	BuffFilter:OnTimer()
@@ -521,10 +554,18 @@ end
 function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
 	local grid = self.wndSettings:FindChild("Grid")	
 
-	-- Determine column from target type. (TODO: add mapping table for this?)
-	local nColumn = eTargetType == eTargetTypes.Player and 4 or 5
+	-- Determine column from target type.
+	local nColumn = self.tTargetToColumn[eTargetType]
 	
 	grid:SetCellImage(nRow, nColumn, bHide and "IconSprites:Icon_Windows_UI_CRB_Marker_Ghost" or "")
 	grid:SetCellSortText(nRow, nColumn, bHide and "1" or "0")
+end
+
+
+---------------------------------------------------------------------------------------------------
+-- SettingsForm Functions
+---------------------------------------------------------------------------------------------------
+function BuffFilter:OnGenerateTooltip( wndHandler, wndControl, eToolTipType, x, y )
+	log:info("Test, x=%d, y=%d", x, y)
 end
 
