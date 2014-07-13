@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {1, 4, 0}
+BuffFilter.ADDON_VERSION = {1, 4, 1}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -210,7 +210,7 @@ function BuffFilter:GetBarsToFilter()
 								-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
 								result[#result+1] = tFoundBar
 							else
-								--log:debug("Unable to locate '%s/%s'-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
+								log:warn("Unable to locate '%s/%s'-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
 							end
 						else
 							--log:debug("Provider '%s' does not support bar type '%s/%s'. Skipping.", strProvider, eTargetType, eBuffType)
@@ -268,14 +268,21 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 	local wndCurrentBuffs = wndBuffBar:GetChildren()
 	
 	-- No buffs on buffbar? Just do nothing then.
-	if wndCurrentBuffs == nil then return end	
+	if wndCurrentBuffs == nil then 
+		log:warn("No child windows on buffbar")
+		return
+	end
 			
 	-- Buffs found, loop over them all, hide ones on todo list
 	for _,wndCurrentBuff in ipairs(wndCurrentBuffs) do
 		local strBuffTooltip = wndCurrentBuff:GetBuffTooltip()
 		
-		local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
-		wndCurrentBuff:Show(not bShouldHide)
+		if strBuffTooltip == nil or strBuffTooltip:len() == 0 then
+			log:warn("Buff with no tooltip encountered")
+		else
+			local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
+			wndCurrentBuff:Show(not bShouldHide)
+		end		
 	end
 end
 
@@ -359,6 +366,27 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		-- Buff already known, do nothing
 		return
 	end
+	
+	-- Input sanity check
+	if type(nBaseSpellId) ~= "number" then
+		log:warn("Trying to register buff with no spellId. Name: %s, Tooltip: %s", tostring(strName), tostring(strTooltip))
+		return
+	end
+	
+	if type(strName) ~= "string" then
+		log:warn("Trying to register buff with no name. SpellId: %d, Tooltip: %s", nBaseSpellId, tostring(strTooltip))
+		return
+	end
+
+	if type(strTooltip) ~= "string" then
+		log:warn("Trying to register buff with no tooltip. SpellId: %d, Name: %s", nBaseSpellId, tostring(strName))
+		return
+	end
+	
+	if type(strIcon) ~= "string" then
+		log:warn("Trying to register buff with no icon. SpellId: %d, Name: %s", nBaseSpellId, tostring(strName))
+		return
+	end	
 	
 	log:info("Registering buff: '%s'", strName)
 	
