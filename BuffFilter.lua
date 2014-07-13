@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {1, 4, 1}
+BuffFilter.ADDON_VERSION = {2, 0, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -84,7 +84,12 @@ function BuffFilter:OnInitialize()
 	-- Reverse map tTargetToColumn
 	self.tColumnToTarget = {}
 	for k,v in pairs(self.tTargetToColumn) do self.tColumnToTarget[v] = k end
-	
+
+	-- Used to control the settings gui tab buttons
+	self.tTabButtonToForm = {
+		BuffsTabBtn = "BuffsGroup",
+		ConfigurationTabBtn = "ConfigurationGroup",
+	}
 end
 
 function BuffFilter:OnEnable()	
@@ -92,13 +97,15 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.WARN,
+		level = GeminiLogging.FATAL,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
 
 	BuffFilter.log = log -- store ref for GeminiConsole-access to loglevel
 	log:info("Initializing addon 'BuffFilter'")
+	
+	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self)
 	
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
@@ -116,13 +123,18 @@ function BuffFilter:OnDocLoaded()
 		self.wndSettings:Show(false, true)
 		self.xmlDoc = nil
 	end
+	
+	-- Preselect tab 1
+	self.wndSettings:FindChild("BuffsTabBtn"):SetCheck(true)
+	self.wndSettings:FindChild("BuffsGroup"):Show(true, true)
+	self.wndSettings:FindChild("ConfigurationGroup"):Show(false, true)
 		
 	-- Restore saved data
 	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
 	if not bStatus then 
 		log:warn("Failed to restore all savedata: %s", message)
 	end
-			
+				
 	-- Fire scanner once and start timer
 	BuffFilter:OnTimer()
 	self.scanTimer = ApolloTimer.Create(self.wndSettings:FindChild("Slider"):GetValue()/1000, true, "OnTimer", self)
@@ -170,6 +182,13 @@ end
 
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
+	-- Determine if "only hide in combat" is enabled, and affects this pass
+	if self.bOnlyHideInCombat == true then
+		self.bDisableHiding = not GameLib.GetPlayerUnit():IsInCombat()
+	else
+		self.bDisableHiding = false
+	end
+
 	--log:debug("BuffFilter timer")
 	local tBarsToFilter = BuffFilter:GetBarsToFilter()
 	--log:debug("%d bars to scan identified", #tBarsToFilter)
@@ -277,10 +296,12 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 	for _,wndCurrentBuff in ipairs(wndCurrentBuffs) do
 		local strBuffTooltip = wndCurrentBuff:GetBuffTooltip()
 		
-		if strBuffTooltip == nil or strBuffTooltip:len() == 0 then
-			log:warn("Buff with no tooltip encountered")
+		if strBuffTooltip == nil or strBuffTooltip:len() <= 1 then
+			-- Certain buffs will have no tooltip message - just ignore these for now.
+			--log:debug("Buff with no tooltip encountered")
 		else
-			local bShouldHide = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
+			local bTooltipMarkedForHiding = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]			
+			local bShouldHide = bTooltipMarkedForHiding and not BuffFilter.bDisableHiding
 			wndCurrentBuff:Show(not bShouldHide)
 		end		
 	end
@@ -369,22 +390,22 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	
 	-- Input sanity check
 	if type(nBaseSpellId) ~= "number" then
-		log:warn("Trying to register buff with no spellId. Name: %s, Tooltip: %s", tostring(strName), tostring(strTooltip))
+		--log:debug("Trying to register buff with no spellId. Name: %s, Tooltip: %s", tostring(strName), tostring(strTooltip))
 		return
 	end
 	
-	if type(strName) ~= "string" then
-		log:warn("Trying to register buff with no name. SpellId: %d, Tooltip: %s", nBaseSpellId, tostring(strTooltip))
+	if type(strName) ~= "string" or strName:len() < 1 then
+		--log:debug("Trying to register buff with no name. SpellId: %d, Tooltip: %s", nBaseSpellId, tostring(strTooltip))
 		return
 	end
 
-	if type(strTooltip) ~= "string" then
-		log:warn("Trying to register buff with no tooltip. SpellId: %d, Name: %s", nBaseSpellId, tostring(strName))
+	if type(strTooltip) ~= "string" or strTooltip:len() < 1 then
+		--log:debug("Trying to register buff with no tooltip. SpellId: %d, Name: %s", nBaseSpellId, tostring(strName))
 		return
 	end
 	
-	if type(strIcon) ~= "string" then
-		log:warn("Trying to register buff with no icon. SpellId: %d, Name: %s", nBaseSpellId, tostring(strName))
+	if type(strIcon) ~= "string" or strIcon:len() < 1 then
+		--log:debug("Trying to register buff with no icon. SpellId: %d, Name: %s", nBaseSpellId, tostring(strName))
 		return
 	end	
 	
@@ -438,6 +459,7 @@ function BuffFilter:OnSave(eType)
 	tSaveData.addonVersion = self.ADDON_VERSION
 	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
 	tSaveData.nTimer = self.wndSettings:FindChild("Slider"):GetValue()
+	tSaveData.bOnlyHideInCombat = self.bOnlyHideInCombat
 	return tSaveData	
 end
 
@@ -476,6 +498,14 @@ function BuffFilter:RestoreSaveData()
 			BuffFilter.wndSettings:FindChild("Slider"):SetValue(3000)
 		end
 		BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.wndSettings:FindChild("Slider"):GetValue()/1000))
+		
+		-- Restore "only hide in combat" flag
+		if type(BuffFilter.tSavedData.bOnlyHideInCombat) == "boolean" then
+			BuffFilter.bOnlyHideInCombat = BuffFilter.tSavedData.bOnlyHideInCombat
+		else
+			BuffFilter.bOnlyHideInCombat = false
+		end
+		BuffFilter.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
 		
 		-- Clear saved data object
 		BuffFilter.tSavedData = nil
@@ -587,4 +617,33 @@ function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
 	
 	grid:SetCellImage(nRow, nColumn, bHide and "IconSprites:Icon_Windows_UI_CRB_Marker_Ghost" or "")
 	grid:SetCellSortText(nRow, nColumn, bHide and "1" or "0")
+end
+
+
+function BuffFilter:OnTabBtn(wndHandler, wndControl)	
+	local strFormName = self.tTabButtonToForm[wndControl:GetName()]
+	log:info("Showing Settings-tab '%s'", strFormName)
+	
+	for _,child in pairs(self.wndSettings:FindChild("TabContentArea"):GetChildren()) do
+		child:Show(strFormName == child:GetName())
+	end	
+end
+
+
+function BuffFilter:InCombatBtnCheck(wndHandler, wndControl, eMouseButton )
+	log:info("In-combat only checked")
+	self.bOnlyHideInCombat = true
+	BuffFilter:OnTimer()
+end
+
+function BuffFilter:InCombatBtnUncheck(wndHandler, wndControl, eMouseButton )
+	log:info("In-combat only unchecked")
+	self.bOnlyHideInCombat = false
+	BuffFilter:OnTimer()
+end
+
+
+function BuffFilter:OnUnitEnteredCombat(unit, bCombat)	
+	if unit:GetName() ~= GameLib.GetPlayerUnit():GetName() then return end
+	BuffFilter:OnTimer()
 end
