@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 3, 0}
+BuffFilter.ADDON_VERSION = {2, 3, 1}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -151,14 +151,11 @@ function BuffFilter:OnDocLoaded()
 	-- Load settings form
 	if self.xmlDoc ~= nil and self.xmlDoc:IsLoaded() then
 		self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
-		--self.wndTooltip = Apollo.LoadForm(self.xmlDoc, "TooltipForm", nil, self)
 		if self.wndSettings == nil then
 			Apollo.AddAddonErrorText(self, "Could not load the Settings form.")
 			return
 		end		
 		self.wndSettings:Show(false, true)
-		--self.wndTooltip:Show(false, true)
-		--self.wndSettings:FindChild("Grid"):SetTooltipForm(self.wndTooltip)
 		self.xmlDoc = nil
 	end
 	
@@ -184,7 +181,7 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterSlashCommand("bf", "OnConfigure", self)
 	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
 	
-	self.wndSettings:Show(true, true)	
+	--self.wndSettings:Show(true, true)	
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
