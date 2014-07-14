@@ -132,7 +132,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.WARN,
+		level = GeminiLogging.FATAL,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -525,7 +525,6 @@ function BuffFilter:RegisterBuff(nSpellId, nBaseSpellId, strName, strTooltip, st
 	-- Add buff to Settings window grid
 	
 	local grid = self.wndSettings:FindChild("Grid")
-	log:warn("Grid rowcount: %d", grid:GetRowCount())
 	local nRow = grid:AddRow("", "", tBuffDetails)
 	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
 	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")--tBuffDetails.bIsBeneficial and "1" or "0")
@@ -750,28 +749,16 @@ function BuffFilter:OnUnitEnteredCombat(unit, bCombat)
 	BuffFilter:OnTimer()
 end
 
----------------------------------------------------------------------------------------------------
--- SettingsForm Functions
----------------------------------------------------------------------------------------------------
-function BuffFilter:OnGenerateTooltip( wndHandler, wndControl, eToolTipType, x, y )
---	return self.wndTooltip
---	log:warn("GenerateTooltip")
-end
-
 function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType, x, y )
 	local grid = self.wndSettings:FindChild("Grid")
-	--if grid:GetCellData(x,1) ~= nil then
-	local cd = grid:GetCellData(x+1,1)
-	if cd ~= nil then
-		log:warn("gentooltip, x=%d, y=%d, name=%s", x, y, cd.strName)
-		local tt = grid:LoadTooltipForm("BuffFilter.xml", "TooltipForm")
-		tt:SetText(cd.strName)
-	end
-	
 
-	--if wndHandler:IsMouseTarget() then
-	
-	--end
-	--self.wndSettings:FindChild("Grid"):SetTooltipForm(self.wndTooltip)
+	local tBuffDetails = grid:GetCellData(x+1,1)
+	if tBuffDetails ~= nil then		
+		local tooltip = grid:LoadTooltipForm("BuffFilter.xml", "TooltipForm")
+		tooltip:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)		
+		tooltip:FindChild("BuffName"):SetText(tBuffDetails.strName)
+		tooltip:FindChild("BuffDescription"):SetText(tBuffDetails.strTooltip)
+	end
+
 end
 
