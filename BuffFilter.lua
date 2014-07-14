@@ -163,6 +163,7 @@ function BuffFilter:HookBuffTooltipGeneration()
 		-- But using this ref would mean relying on the user to mouse-over the tooltip 
 		-- every time it should be hidden. So, better to re-scan and tooltip-match later.
 		BuffFilter:RegisterBuff(
+			splSource:GetId(),
 			splSource:GetBaseSpellId(),
 			splSource:GetName(),	
 			wndParent:GetBuffTooltip(),
@@ -380,10 +381,15 @@ end
 
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
-function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)
+function BuffFilter:RegisterBuff(nSpellId, nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)
 	--log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then
+		-- Buff might be from previous version savedata, which did not track spellId. Add for later use.
+		if BuffFilter.tBuffsById[nBaseSpellId].nSpellId == nil then			
+			BuffFilter.tBuffsById[nBaseSpellId].nSpellId = nSpellId
+		end
+		
 		-- Buff already known, do nothing
 		return
 	end
@@ -412,7 +418,8 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	log:info("Registering buff: '%s'", strName)
 	
 	-- Construct buff details table
-	local tBuffDetails =  {
+	local tBuffDetails = {
+		nSpellId = nSpellId,
 		nBaseSpellId = nBaseSpellId,
 		strName = strName,		
 		strTooltip = strTooltip,
@@ -517,6 +524,7 @@ end
 
 function BuffFilter.RestoreSaveDataBuff(id, b)
 	-- Sanity check each individual field
+	--if type(b.nSpellId) ~= "number" then error(string.format("Saved buff Id %d is missing nSpellId number", id)) end -- not yet required, just started data-collection
 	if type(b.nBaseSpellId) ~= "number" then error(string.format("Saved buff Id %d is missing nBaseSpellId number", id)) end
 	if type(b.strName) ~= "string" then error(string.format("Saved buff Id %d is missing name string", id)) end
 	if type(b.strTooltip) ~= "string" then error(string.format("Saved buff Id %d is missing tooltip string", id)) end
@@ -537,6 +545,7 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 	
 	-- All good, now register buff
 	BuffFilter:RegisterBuff(
+		b.nSpellId,
 		b.nBaseSpellId,
 		b.strName,		
 		b.strTooltip,
