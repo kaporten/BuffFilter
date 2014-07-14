@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 0, 0}
+BuffFilter.ADDON_VERSION = {2, 1, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
