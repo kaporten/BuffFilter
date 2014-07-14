@@ -58,7 +58,7 @@ function BuffFilter:OnInitialize()
 			},
 		},		
 		
-		--SimpleBuffBar
+		-- SimpleBuffBar
 		["SimpleBuffBar"] = {
 			fDiscoverBar = BuffFilter.FindBarSimpleBuffBarUI,
 			fFilterBar = BuffFilter.FilterStockBar,
@@ -72,6 +72,21 @@ function BuffFilter:OnInitialize()
 				[eBuffTypes.Debuff] = "DebuffBar"
 			},
 		},
+		
+		-- Viking Unit Frames
+		["VikingUnitFrames"] = {
+			fDiscoverBar = BuffFilter.FindBarVikingUnitFrames,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "luaVikingUnitFrame",
+				[eTargetTypes.Target] = "luaVikingTargetFrame",
+				[eTargetTypes.Focus] = "luaVikingFocusFrame"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BeneBuffBar",
+				[eBuffTypes.Debuff] = "HarmBuffBar"
+			},
+		},		
 	}
 	
 	-- Mapping tables for the Grids column-to-targettype translation
@@ -241,7 +256,7 @@ function BuffFilter:GetBarsToFilter()
 				end
 			end
 		else
-			--log:debug("Provider '%s' not found, skipping.", strProvider)
+			--log:info("Provider '%s' not found, skipping.", strProvider)
 		end
 	end
 	
@@ -378,6 +393,21 @@ function BuffFilter:TargetChangedSimpleBuffBar(unitTarget)
 		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
 	end
 end
+
+function BuffFilter.FindBarVikingUnitFrames(strTargetType, strBuffType)
+	local VTF = Apollo.GetAddon("VikingUnitFrames")
+	if VTF == nil then
+		error("Addon 'VikingUnitFrames' not installed")
+	end
+	
+	local bar = VTF[strTargetType].wndLargeFrame:FindChild(strBuffType)
+	if bar == nil then
+		error("Bar not found")
+	end
+	
+	return bar
+end
+
 
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
