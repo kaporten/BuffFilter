@@ -523,13 +523,13 @@ function BuffFilter:RegisterBuff(nSpellId, nBaseSpellId, strName, strTooltip, st
 	BuffFilter.tBuffsById[tBuffDetails.nBaseSpellId] = tBuffDetails
 	
 	-- Add buff to Settings window grid
+	
 	local grid = self.wndSettings:FindChild("Grid")
+	log:warn("Grid rowcount: %d", grid:GetRowCount())
 	local nRow = grid:AddRow("", "", tBuffDetails)
 	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
-	--grid:SetCellText(nRow, 1, "x")
 	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")--tBuffDetails.bIsBeneficial and "1" or "0")
 	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
-	grid:SetCellText(nRow, 2, "")
 	grid:SetCellText(nRow, 3, tBuffDetails.strName)	
 	
 	-- Update tooltip summary status for buff
@@ -759,9 +759,18 @@ function BuffFilter:OnGenerateTooltip( wndHandler, wndControl, eToolTipType, x, 
 end
 
 function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType, x, y )
+	local grid = self.wndSettings:FindChild("Grid")
+	--if grid:GetCellData(x,1) ~= nil then
+	local cd = grid:GetCellData(x+1,1)
+	if cd ~= nil then
+		log:warn("gentooltip, x=%d, y=%d, name=%s", x, y, cd.strName)
+		local tt = grid:LoadTooltipForm("BuffFilter.xml", "TooltipForm")
+		tt:SetText(cd.strName)
+	end
+	
+
 	--if wndHandler:IsMouseTarget() then
-	log:warn("gentooltip, x=%d, y=%d", x, y)
-	self.wndSettings:FindChild("Grid"):LoadTooltipForm("BuffFilter.xml", "TooltipForm")
+	
 	--end
 	--self.wndSettings:FindChild("Grid"):SetTooltipForm(self.wndTooltip)
 end
