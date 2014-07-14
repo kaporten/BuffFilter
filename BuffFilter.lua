@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 2, 0}
+BuffFilter.ADDON_VERSION = {2, 3, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -132,7 +132,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.FATAL,
+		level = GeminiLogging.WARN,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -151,11 +151,14 @@ function BuffFilter:OnDocLoaded()
 	-- Load settings form
 	if self.xmlDoc ~= nil and self.xmlDoc:IsLoaded() then
 		self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
+		--self.wndTooltip = Apollo.LoadForm(self.xmlDoc, "TooltipForm", nil, self)
 		if self.wndSettings == nil then
 			Apollo.AddAddonErrorText(self, "Could not load the Settings form.")
 			return
 		end		
 		self.wndSettings:Show(false, true)
+		--self.wndTooltip:Show(false, true)
+		--self.wndSettings:FindChild("Grid"):SetTooltipForm(self.wndTooltip)
 		self.xmlDoc = nil
 	end
 	
@@ -181,7 +184,7 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterSlashCommand("bf", "OnConfigure", self)
 	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
 	
-	--self.wndSettings:Show(true, true)	
+	self.wndSettings:Show(true, true)	
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -523,8 +526,10 @@ function BuffFilter:RegisterBuff(nSpellId, nBaseSpellId, strName, strTooltip, st
 	local grid = self.wndSettings:FindChild("Grid")
 	local nRow = grid:AddRow("", "", tBuffDetails)
 	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
+	--grid:SetCellText(nRow, 1, "x")
 	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")--tBuffDetails.bIsBeneficial and "1" or "0")
 	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
+	grid:SetCellText(nRow, 2, "")
 	grid:SetCellText(nRow, 3, tBuffDetails.strName)	
 	
 	-- Update tooltip summary status for buff
@@ -744,3 +749,20 @@ function BuffFilter:OnUnitEnteredCombat(unit, bCombat)
 	if unit:GetName() ~= GameLib.GetPlayerUnit():GetName() then return end
 	BuffFilter:OnTimer()
 end
+
+---------------------------------------------------------------------------------------------------
+-- SettingsForm Functions
+---------------------------------------------------------------------------------------------------
+function BuffFilter:OnGenerateTooltip( wndHandler, wndControl, eToolTipType, x, y )
+--	return self.wndTooltip
+--	log:warn("GenerateTooltip")
+end
+
+function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType, x, y )
+	--if wndHandler:IsMouseTarget() then
+	log:warn("gentooltip, x=%d, y=%d", x, y)
+	self.wndSettings:FindChild("Grid"):LoadTooltipForm("BuffFilter.xml", "TooltipForm")
+	--end
+	--self.wndSettings:FindChild("Grid"):SetTooltipForm(self.wndTooltip)
+end
+
