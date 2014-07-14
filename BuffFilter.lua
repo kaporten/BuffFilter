@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 1, 0}
+BuffFilter.ADDON_VERSION = {2, 2, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -86,8 +86,27 @@ function BuffFilter:OnInitialize()
 				[eBuffTypes.Buff] = "BeneBuffBar",
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
+		},
+		
+		["FastTargetFrame"] = {
+			fDiscoverBar = BuffFilter.FindBarFastTargetFrames,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "luaUnitFrame",
+				[eTargetTypes.Target] = "luaTargetFrame",
+				[eTargetTypes.Focus] = "luaFocusFrame"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BeneBuffBar",
+				[eBuffTypes.Debuff] = "HarmBuffBar"
+			},
 		},		
 	}
+	
+	-- Build list of supported addons, to be used in error messages
+	local tSupportedAddons = {}
+	for k,_ in pairs(self.tBarProviders) do	tSupportedAddons[#tSupportedAddons+1] = k end
+	self.strSupportedAddons = table.concat(tSupportedAddons, ", ")
 	
 	-- Mapping tables for the Grids column-to-targettype translation
 	self.tTargetToColumn = {
@@ -96,6 +115,7 @@ function BuffFilter:OnInitialize()
 		[eTargetTypes.Focus] = 6,
 		[eTargetTypes.TargetOfTarget] = 7,
 	}
+	
 	-- Reverse map tTargetToColumn
 	self.tColumnToTarget = {}
 	for k,v in pairs(self.tTargetToColumn) do self.tColumnToTarget[v] = k end
@@ -222,7 +242,7 @@ function BuffFilter:GetBarsToFilter()
 
 	-- For every provider/target/bufftype combination,
 	-- call each provider-specific function to scan for the bar
-	for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do
+	for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do		
 		if Apollo.GetAddon(strProvider) ~= nil then 
 			for _,eTargetType in pairs(eTargetTypes) do
 				local strBarTypeParam = tProviderDetails.tTargetType[eTargetType]
@@ -258,7 +278,7 @@ function BuffFilter:GetBarsToFilter()
 		else
 			--log:info("Provider '%s' not found, skipping.", strProvider)
 		end
-	end
+	end	
 	
 	return result
 end
@@ -394,6 +414,7 @@ function BuffFilter:TargetChangedSimpleBuffBar(unitTarget)
 	end
 end
 
+-- Viking Unit Frames finder
 function BuffFilter.FindBarVikingUnitFrames(strTargetType, strBuffType)
 	local VTF = Apollo.GetAddon("VikingUnitFrames")
 	if VTF == nil then
@@ -408,6 +429,43 @@ function BuffFilter.FindBarVikingUnitFrames(strTargetType, strBuffType)
 	return bar
 end
 
+-- Fast Target Frames finder
+function BuffFilter.FindBarFastTargetFrames(strTargetType, strBuffType)	
+	local FTF = Apollo.GetAddon("FastTargetFrame")
+	if FTF == nil then 
+		error("Addon 'FastTargetFrame' not found")
+	end	
+	
+	local targetFrame = FTF[strTargetType]
+	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)	
+	if bar == nil then 
+		error("Bar not found")
+	end	
+
+	-- If bar is found (ie., if above lines of code didn't fail or return), check if we found a Target frame.
+	-- If so, hook into the stock "target changed" function for immediate updates
+	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
+		if not H:IsHooked(FTF, "OnTargetUnitChanged") then
+			log:info("Hooking FastTargetFrame.OnTargetUnitChanged")
+			H:RawHook(FTF, "OnTargetUnitChanged", BuffFilter.TargetChangedFastTargetFrame)
+		end
+	end
+	
+	return bar
+end
+
+-- Called when the target changes. Setup is done in the Fast Target Frames bar discovery function "FindBarFastTargetFrames"
+function BuffFilter:TargetChangedFastTargetFrame(unitTarget)
+	log:info("FastTargetFrame Target change intercepted")
+	
+	-- First, pass call to the real TargetFrame addon
+	local FTF = Apollo.GetAddon("FastTargetFrame")	
+	H.hooks[FTF].OnTargetUnitChanged(FTF, unitTarget)
+
+	if unitTarget ~= nil then
+		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
+	end
+end
 
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
