@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 3, 2}
+BuffFilter.ADDON_VERSION = {2, 4, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -102,12 +102,7 @@ function BuffFilter:OnInitialize()
 			},
 		},		
 	}
-	
-	-- Build list of supported addons, to be used in error messages
-	local tSupportedAddons = {}
-	for k,_ in pairs(self.tBarProviders) do	tSupportedAddons[#tSupportedAddons+1] = k end
-	self.strSupportedAddons = table.concat(tSupportedAddons, ", ")
-	
+		
 	-- Mapping tables for the Grids column-to-targettype translation
 	self.tTargetToColumn = {
 		[eTargetTypes.Player] = 4,
@@ -657,6 +652,7 @@ end
 
 function BuffFilter:OnConfigure()
 	self.wndSettings:Show(true, false)	
+	self:CheckAddons()
 end
 
 function BuffFilter:OnHideSettings()
@@ -762,3 +758,25 @@ function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType,
 
 end
 
+-- Checks if any supported addon is found, displays warning message overlay in settings if not
+function BuffFilter:CheckAddons()
+	for addon,_ in pairs(self.tBarProviders) do
+		if Apollo.GetAddon(addon) ~= nil then 
+			return 
+		end
+	end
+	
+	-- Build list of supported addons
+	local tSupportedAddons = {}
+	for k,_ in pairs(self.tBarProviders) do	tSupportedAddons[#tSupportedAddons+1] = k end
+	local strSupportedAddons = table.concat(tSupportedAddons, "\n")
+	
+	-- Show warning message
+	self.wndSettings:FindChild("GeneralDescription"):SetText("BuffFilter only works with the stock Unit Frames, or a specific list of replacement / additional Unit Frame addons.\n\nWithout one of the following addons installed, BuffFilter will simply not hide any buffs.")
+	self.wndSettings:FindChild("SupportedAddonList"):SetText(strSupportedAddons)
+	self.wndSettings:FindChild("WarningFrame"):Show(true, false)	
+end
+
+function BuffFilter:CloseWarningButton()
+	self.wndSettings:FindChild("WarningFrame"):Show(false, true)
+end
