@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 3, 1}
+BuffFilter.ADDON_VERSION = {2, 3, 2}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -220,7 +220,10 @@ end
 function BuffFilter:OnTimer()
 	-- Determine if "only hide in combat" is enabled, and affects this pass
 	if self.bOnlyHideInCombat == true then
-		self.bDisableHiding = not GameLib.GetPlayerUnit():IsInCombat()
+		local pu = GameLib.GetPlayerUnit()
+		if pu ~= nil then
+			self.bDisableHiding = not pu:IsInCombat()
+		end		
 	else
 		self.bDisableHiding = false
 	end
