@@ -3,10 +3,9 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 5, 0}
+BuffFilter.ADDON_VERSION = {2, 6, 0}
 
 local log
-local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -134,8 +133,11 @@ function BuffFilter:OnEnable()
 
 	BuffFilter.log = log -- store ref for GeminiConsole-access to loglevel
 	log:info("Initializing addon 'BuffFilter'")
-	
-	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self)
+
+	-- Register events so buffs can be re-filtered outside of the timered schedule
+	Apollo.RegisterEventHandler("ChangeWorld", "OnTimer", self) -- on /reloadui and instance-changes	
+	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self) -- when entering/exiting combat
+	Apollo.RegisterEventHandler("TargetUnitChanged", "OnTargetUnitChanged", self) -- when changing target
 	
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
@@ -292,15 +294,6 @@ function BuffFilter.FindBarStockUI(strTargetType, strBuffType)
 	if bar == nil then 
 		error("Bar not found")
 	end	
-
-	-- If bar is found (ie., if above lines of code didn't fail or return), check if we found a Target frame.
-	-- If so, hook into the stock "target changed" function for immediate updates
-	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
-		if not H:IsHooked(TF, "OnTargetUnitChanged") then
-			log:info("Hooking TargetFrames.OnTargetUnitChanged")
-			H:RawHook(TF, "OnTargetUnitChanged", BuffFilter.TargetChangedStock)
-		end
-	end
 	
 	return bar
 end
@@ -340,25 +333,6 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 	end
 end
 
--- Called when the target changes. Setup is done in the stock bar discovery function "FindBarStockUI"
-function BuffFilter:TargetChangedStock(unitTarget)
-	log:info("Stock Target change intercepted")
-	
-	-- First, pass call to the real TargetFrame addon
-	local TF = Apollo.GetAddon("TargetFrame")	
-	H.hooks[TF].OnTargetUnitChanged(TF, unitTarget)
-
-	--[[
-		Curiosity: the target change itself does not actually update the buff-bar contents.
-		That apparently happens at 0.1s intervals, regardless of target change. So, once
-		a target change is identified (=now), schedule a single buff-filter in 100ms. That
-		should be enough time for the buffs to actually be present on the target bars.
-	]]
-	if unitTarget ~= nil then
-		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
-	end
-end
-
 -- PotatoUI-specific bar search
 function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	local PUI = Apollo.GetAddon("PotatoFrames")
@@ -388,27 +362,8 @@ function BuffFilter.FindBarSimpleBuffBarUI(strTargetType, strBuffType)
 	if bar == nil then 
 		error("Bar not found")
 	end
-
-	-- SimpleBuffBar addon found, and bar could be dug out. Must be fully loaded then.
-	-- Hook into OnTargetUnitChanged for immediate filter-updates.
-	if not H:IsHooked(SBB, "OnTargetUnitChanged") then
-		log:info("Hooking SimpleBuffBar.OnTargetUnitChanged")
-		H:RawHook(SBB, "OnTargetUnitChanged", BuffFilter.TargetChangedSimpleBuffBar)
-	end
 	
 	return bar
-end
-
-function BuffFilter:TargetChangedSimpleBuffBar(unitTarget)
-	log:info("SimpleBuffBar change intercepted")
-	
-	-- First, pass call to the real TargetFrame addon
-	local SBB = Apollo.GetAddon("SimpleBuffBar")	
-	H.hooks[SBB].OnTargetUnitChanged(SBB, unitTarget)
-
-	if unitTarget ~= nil then
-		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
-	end
 end
 
 -- Viking Unit Frames finder
@@ -438,32 +393,22 @@ function BuffFilter.FindBarFastTargetFrames(strTargetType, strBuffType)
 	if bar == nil then 
 		error("Bar not found")
 	end	
-
-	-- If bar is found (ie., if above lines of code didn't fail or return), check if we found a Target frame.
-	-- If so, hook into the stock "target changed" function for immediate updates
-	if strTargetType == BuffFilter.tBarProviders.TargetFrame.tTargetType[eTargetTypes.Target] then
-		if not H:IsHooked(FTF, "OnTargetUnitChanged") then
-			log:info("Hooking FastTargetFrame.OnTargetUnitChanged")
-			H:RawHook(FTF, "OnTargetUnitChanged", BuffFilter.TargetChangedFastTargetFrame)
-		end
-	end
 	
 	return bar
 end
 
--- Called when the target changes. Setup is done in the Fast Target Frames bar discovery function "FindBarFastTargetFrames"
-function BuffFilter:TargetChangedFastTargetFrame(unitTarget)
-	log:info("FastTargetFrame Target change intercepted")
-	
-	-- First, pass call to the real TargetFrame addon
-	local FTF = Apollo.GetAddon("FastTargetFrame")	
-	H.hooks[FTF].OnTargetUnitChanged(FTF, unitTarget)
-
+-- When target changes, schedule a near-immediate buff filtering.
+function BuffFilter:OnTargetUnitChanged(unitTarget)
+	--[[
+		Curiosity: the target change itself does not actually update the buff-bar contents.
+		That apparently happens at 0.1s intervals, regardless of target change. So, once
+		a target change is identified (=now), schedule a single buff-filter in 100ms. That
+		should be enough time for the buffs to actually be present on the target bars.
+	]]
 	if unitTarget ~= nil then
-		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
+		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)
 	end
 end
-
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
 function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)

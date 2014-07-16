@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Addon Author="porten" APIVersion="9" Name="BuffFilter" Description="Hides selected buffs/debuffs on your buffbar.">
     <Script Name="Libs/GeminiAddon-1.1/GeminiAddon.lua"/>
-    <Script Name="Libs/GeminiHook-1.0/GeminiHook-1.0.lua"/>
     <Script Name="Libs/GeminiLogging-1.2/GeminiLogging.lua"/>
     <Script Name="BuffFilter.lua"/>
     <Form Name="BuffFilter.xml"/>
