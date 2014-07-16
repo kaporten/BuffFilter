@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 4, 0}
+BuffFilter.ADDON_VERSION = {2, 5, 0}
 
 local log
 local H = Apollo.GetPackage("Gemini:Hook-1.0").tPackage
@@ -75,17 +75,17 @@ function BuffFilter:OnInitialize()
 		
 		-- Viking Unit Frames
 		["VikingUnitFrames"] = {
-			fDiscoverBar = BuffFilter.FindBarVikingUnitFrames,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
-				[eTargetTypes.Player] = "luaVikingUnitFrame",
-				[eTargetTypes.Target] = "luaVikingTargetFrame",
-				[eTargetTypes.Focus] = "luaVikingFocusFrame"
+				[eTargetTypes.Player] = "tPlayerFrame",
+				[eTargetTypes.Target] = "tTargetFrame",
+				[eTargetTypes.Focus] = "tFocusFrame"
 			},
 			tBuffType = {
-				[eBuffTypes.Buff] = "BeneBuffBar",
-				[eBuffTypes.Debuff] = "HarmBuffBar"
-			},
+				[eBuffTypes.Buff] = "Good",
+				[eBuffTypes.Debuff] = "Bad"
+			},		
+			fDiscoverBar = BuffFilter.FindBarVikingUnitFrames,
+			fFilterBar = BuffFilter.FilterStockBar,
 		},
 		
 		["FastTargetFrame"] = {
@@ -419,7 +419,7 @@ function BuffFilter.FindBarVikingUnitFrames(strTargetType, strBuffType)
 		error("Addon 'VikingUnitFrames' not installed")
 	end
 	
-	local bar = VTF[strTargetType].wndLargeFrame:FindChild(strBuffType)
+	local bar = VTF[strTargetType].wndUnitFrame:FindChild(strBuffType)
 	if bar == nil then
 		error("Bar not found")
 	end
