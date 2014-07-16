@@ -158,7 +158,7 @@ function BuffFilter:OnDocLoaded()
 	self.wndSettings:FindChild("BuffsTabBtn"):SetCheck(true)
 	self.wndSettings:FindChild("BuffsGroup"):Show(true, true)
 	self.wndSettings:FindChild("ConfigurationGroup"):Show(false, true)
-		
+	
 	-- Restore saved data
 	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
 	if not bStatus then 
@@ -176,7 +176,7 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterSlashCommand("bf", "OnConfigure", self)
 	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
 	
-	--self.wndSettings:Show(true, true)	
+	--self.wndSettings:Show(true, true)
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -651,7 +651,9 @@ end
 --[[ SETTINGS GUI ]]
 
 function BuffFilter:OnConfigure()
-	self.wndSettings:Show(true, false)	
+	-- Sort buffs before showing settings
+	self.wndSettings:FindChild("Grid"):SetSortColumn(3, true)
+	self.wndSettings:Show(true, false)
 	self:CheckAddons()
 end
 
@@ -750,12 +752,20 @@ function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType,
 
 	local tBuffDetails = grid:GetCellData(x+1,1)
 	if tBuffDetails ~= nil then		
-		local tooltip = grid:LoadTooltipForm("BuffFilter.xml", "TooltipForm")
-		tooltip:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)		
-		tooltip:FindChild("BuffName"):SetText(tBuffDetails.strName)
-		tooltip:FindChild("BuffDescription"):SetText(tBuffDetails.strTooltip)
-	end
+		local wndTooltip = grid:LoadTooltipForm("BuffFilter.xml", "TooltipForm")
+		wndTooltip:FindChild("BuffIcon"):SetSprite(tBuffDetails.strIcon)		
+		wndTooltip:FindChild("BuffName"):SetText(tBuffDetails.strName)
+		
+		local wndDesc = wndTooltip:FindChild("BuffDescription")
+		local nMinimumHeight = wndTooltip:GetHeight() -- Original tooltip height
 
+		-- Set description and recalc height
+		wndDesc:SetText(tBuffDetails.strTooltip)
+		wndDesc:SetHeightToContentHeight()
+		
+		local nHeight = math.max(wndDesc:GetHeight() + 40, nMinimumHeight) -- 40 for fixed name+padding height
+		wndTooltip:SetAnchorOffsets(0, 0, wndTooltip:GetWidth(), nHeight)
+	end
 end
 
 -- Checks if any supported addon is found, displays warning message overlay in settings if not
@@ -771,10 +781,11 @@ function BuffFilter:CheckAddons()
 	for k,_ in pairs(self.tBarProviders) do	tSupportedAddons[#tSupportedAddons+1] = k end
 	local strSupportedAddons = table.concat(tSupportedAddons, "\n")
 	
+	
 	-- Show warning message
 	self.wndSettings:FindChild("GeneralDescription"):SetText("BuffFilter only works with the stock Unit Frames, or a specific list of replacement / additional Unit Frame addons.\n\nWithout one of the following addons installed, BuffFilter will simply not hide any buffs.")
 	self.wndSettings:FindChild("SupportedAddonList"):SetText(strSupportedAddons)
-	self.wndSettings:FindChild("WarningFrame"):Show(true, false)	
+	self.wndSettings:FindChild("WarningFrame"):Show(true, false)
 end
 
 function BuffFilter:CloseWarningButton()
