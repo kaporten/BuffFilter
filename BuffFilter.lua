@@ -642,9 +642,15 @@ end
 --[[ SETTINGS GUI ]]
 
 function BuffFilter:OnConfigure()
-	-- Sort buffs before showing settings
-	self.wndSettings:FindChild("Grid"):SetSortColumn(3, true)
+	-- Sort buffs before showing settings, but only if not already sorted (allow preservation of other sorting)
+	if self.wndSettings:FindChild("Grid"):GetSortColumn() == nil then
+		self.wndSettings:FindChild("Grid"):SetSortColumn(3, true)
+	end
+	
+	-- Show settings window
 	self.wndSettings:Show(true, false)
+	
+	-- Show warning window?
 	self:CheckAddons()
 end
 
