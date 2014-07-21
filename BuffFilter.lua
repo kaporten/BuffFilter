@@ -2,8 +2,8 @@
 require "Apollo"
 require "Window"
 
-local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips"})
-BuffFilter.ADDON_VERSION = {2, 6, 0}
+local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
+BuffFilter.ADDON_VERSION = {2, 7, 0}
 
 local log
 
@@ -209,6 +209,18 @@ function BuffFilter:HookBuffTooltipGeneration()
 
 		-- Return generated tooltip to client addon
 		return wndTooltip
+	end
+end
+
+function BuffFilter:OnDependencyError()
+	-- Either regular Tooltip or VikingTooltips must be present
+	if Apollo.GetAddon("ToolTips") ~= nil then
+		return true
+	end
+	
+	if Apollo.GetAddon("VikingTooltips") ~= nil	then
+		Tooltip = Apollo.GetAddon("VikingTooltips")
+		return true
 	end
 end
 
