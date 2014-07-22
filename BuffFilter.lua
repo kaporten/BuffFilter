@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {2, 7, 0}
+BuffFilter.ADDON_VERSION = {3, 0, 0}
 
 local log
 
@@ -17,6 +17,13 @@ local eTargetTypes = {
 local eBuffTypes = {
 	Buff = "Buff",
 	Debuff = "Debuff"
+}
+
+-- Buff sort priorities (just high/low for now)
+local ePriority = {
+	High = 1,
+	Unset = 5,
+	Low = 9
 }
 
 function BuffFilter:OnInitialize()
@@ -101,7 +108,7 @@ function BuffFilter:OnInitialize()
 			},
 		},		
 	}
-		
+	
 	-- Mapping tables for the Grids column-to-targettype translation
 	self.tTargetToColumn = {
 		[eTargetTypes.Player] = 4,
@@ -205,7 +212,8 @@ function BuffFilter:HookBuffTooltipGeneration()
 				[eTargetTypes.Target] = false,
 				[eTargetTypes.Focus] = false,
 				[eTargetTypes.TargetOfTarget] = false
-			})
+			},
+			ePriority.Unset)
 
 		-- Return generated tooltip to client addon
 		return wndTooltip
@@ -244,6 +252,10 @@ function BuffFilter:OnTimer()
 		-- Call provider-specific filter function.
 		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
 		b.fFilterBar(b.bar, b.eTargetType, b.eBuffType)
+		
+		if BuffFilter.bEnableSorting == true then
+			BuffFilter:SortStockBar(b.bar)
+		end
 	end
 end
 
@@ -345,6 +357,32 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 	end
 end
 
+function BuffFilter:SortStockBar(wndBuffBar)
+	wndBuffBar:ArrangeChildrenHorz(0, 
+		function(a, b) 
+			local strTooltipA = a:GetBuffTooltip()
+			local strTooltipB = b:GetBuffTooltip()
+			
+			-- Tooltip-less buffs encountered. Buff with tooltip wins the priority-check.
+			if strTooltipA == nil or strTooltipA:len() <= 1 or strTooltipB == nil or strTooltipB:len() <= 1 then
+				return strTooltipA ~= nil and strTooltipA:len() >= 1
+			end
+			
+			local tStatusA = BuffFilter.tBuffStatusByTooltip[strTooltipA]
+			local tStatusB = BuffFilter.tBuffStatusByTooltip[strTooltipB]
+		
+			local nPrioA = tStatusA and tStatusA.nPriority or ePriority.Unset
+			local nPrioB = tStatusB and tStatusB.nPriority or ePriority.Unset
+			
+			if nPrioA == nil or nPrioB == nil then
+				log:warn("Error determining priority of buffs, nPrioA=%d, nPrioB=%d, strTooltipA=%s, strTooltipB=%s", tostring(nPrioA), tostring(nPrioB), tostring(strTooltipA), tostring(strTooltipB))
+			end
+			
+			return nPrioA < nPrioB
+		end
+	)
+end
+
 -- PotatoUI-specific bar search
 function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	local PUI = Apollo.GetAddon("PotatoFrames")
@@ -423,7 +461,7 @@ function BuffFilter:OnTargetUnitChanged(unitTarget)
 end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
-function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide)
+function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide, nPriority)
 	--log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then	
@@ -452,7 +490,7 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		return
 	end	
 	
-	log:info("Registering buff: '%s'", strName)
+	log:info("Registering buff: '%s', priority: %s", strName, tostring(nPriority))
 	
 	-- Construct buff details table
 	local tBuffDetails = {
@@ -461,7 +499,8 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		strTooltip = strTooltip,
 		strIcon = strIcon,		
 		bIsBeneficial = bIsBeneficial,
-		bHide = bHide
+		bHide = bHide,
+		nPriority = nPriority or ePriority.Unset
 	}
 	
 	-- Add to byId table
@@ -472,7 +511,7 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	local grid = self.wndSettings:FindChild("Grid")
 	local nRow = grid:AddRow("", "", tBuffDetails)
 	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
-	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")--tBuffDetails.bIsBeneficial and "1" or "0")
+	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
 	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
 	grid:SetCellText(nRow, 3, tBuffDetails.strName)	
 	
@@ -487,6 +526,10 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	for k,v in pairs(bHide) do
 		BuffFilter:SetGridRowStatus(nRow, k, v)
 	end
+	
+	-- Also update priority (if not already set)
+	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip].nPriority = BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip].nPriority or nPriority
+	BuffFilter:SetGridRowPriority(nRow, BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip].nPriority)
 end
 
 
@@ -504,6 +547,7 @@ function BuffFilter:OnSave(eType)
 	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
 	tSaveData.nTimer = self.wndSettings:FindChild("Slider"):GetValue()
 	tSaveData.bOnlyHideInCombat = self.bOnlyHideInCombat
+	tSaveData.bEnableSorting = self.bEnableSorting
 	return tSaveData	
 end
 
@@ -551,11 +595,26 @@ function BuffFilter:RestoreSaveData()
 		end
 		BuffFilter.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
 		
+		-- Restore "enable priority sorting" flag
+		if type(BuffFilter.tSavedData.bEnableSorting) == "boolean" then
+			BuffFilter.bEnableSorting = BuffFilter.tSavedData.bEnableSorting
+		else
+			BuffFilter.bEnableSorting = true
+		end
+		BuffFilter.wndSettings:FindChild("EnableSortingBtn"):SetCheck(BuffFilter.bEnableSorting)
+		
 		-- Clear saved data object
 		BuffFilter.tSavedData = nil
-		
 	else
 		log:info("No saved config found. First run?")
+		
+		-- Default timer value
+		BuffFilter.wndSettings:FindChild("Slider"):SetValue(3000)
+		BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.wndSettings:FindChild("Slider"):GetValue()/1000))
+		
+		-- Default checkbox values
+		BuffFilter.bOnlyHideInCombat = false
+		BuffFilter.bEnableSorting = true		
 	end
 end
 
@@ -591,7 +650,8 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 			[eTargetTypes.Target] = b.bHide[eTargetTypes.Target],
 			[eTargetTypes.Focus] = b.bHide[eTargetTypes.Focus],
 			[eTargetTypes.TargetOfTarget] = b.bHide[eTargetTypes.TargetOfTarget]
-		}
+		},
+		b.nPriority or ePriority.Unset
 	)
 end
 
@@ -641,15 +701,40 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 		
 		-- Also update the by-tooltip summary table to latest value	
 		BuffFilter.tBuffStatusByTooltip[strTooltip][eTargetType] = bUpdatedHide
-	else
-		if nColumn == 3 then
-			log:info("Toggling buff '%s' for all target types", tBuffDetails.strName)
-			-- Clicking name inverses all column selections
-			-- Do this the easy way - by simulating user input on each column
-			for t,c in pairs(self.tTargetToColumn) do
-				BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, c)
-			end			
+	elseif nColumn == 3 then
+		log:info("Toggling buff '%s' for all target types", tBuffDetails.strName)
+		-- Clicking name inverses all column selections
+		-- Do this the easy way - by simulating user input on each column
+		for t,c in pairs(self.tTargetToColumn) do
+			BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, c)
 		end
+	elseif nColumn == 8 then
+		local nPriority = tBuffDetails.nPriority
+		
+		-- Sort toggle order: Unset -> High -> Low -> Unset
+		if nPriority == nil or nPriority == ePriority.Unset then -- Unset -> High
+			nPriority = ePriority.High
+		elseif nPriority == ePriority.High then -- High -> Low
+			nPriority = ePriority.Low
+		else -- Low -> Unset
+			nPriority = nil
+		end
+		
+		-- When a buff has priority changed, update *all* buffs with same tooltip, not just the checked one
+		for r = 1, grid:GetRowCount() do -- for every row on the grid
+			-- Get buff for this row
+			local tRowBuffDetails = grid:GetCellData(r, 1)
+				
+			-- Check if this buff has same tooltip
+			if tRowBuffDetails.strTooltip == strTooltip then
+				log:info("Setting priority for buff '%s' to %s", tRowBuffDetails.strName, tostring(nPriority))
+				tRowBuffDetails.nPriority = nPriority				
+				BuffFilter:SetGridRowPriority(r, nPriority)
+			end
+		end
+		
+		-- Also add priority to the "buff status by tooltip" table
+		BuffFilter.tBuffStatusByTooltip[strTooltip].nPriority = nPriority
 	end
 	
 	-- Force update
@@ -672,6 +757,15 @@ function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
 	grid:SetCellSortText(nRow, nColumn, bHide and "1" or "0")
 end
 
+function BuffFilter:SetGridRowPriority(nRow, nPriority)
+	local grid = self.wndSettings:FindChild("Grid")	
+	if nPriority == nil or nPriority == ePriority.Unset then
+		grid:SetCellImage(nRow, 8, "")					
+	else				
+		grid:SetCellImage(nRow, 8, nPriority == ePriority.High and "CRB_Basekit:kitIcon_Holo_UpArrow" or "CRB_Basekit:kitIcon_Holo_DownArrow")
+	end
+	grid:SetCellSortText(nRow, 8, nPriority or ePriority.Unset)
+end
 
 function BuffFilter:OnTabBtn(wndHandler, wndControl)	
 	local strFormName = self.tTabButtonToForm[wndControl:GetName()]
@@ -692,6 +786,18 @@ end
 function BuffFilter:InCombatBtnUncheck(wndHandler, wndControl, eMouseButton )
 	log:info("In-combat only unchecked")
 	self.bOnlyHideInCombat = false
+	BuffFilter:OnTimer()
+end
+
+function BuffFilter:EnableSortingBtnCheck(wndHandler, wndControl, eMouseButton)
+	log:info("Buff sorting checked")
+	self.bEnableSorting = true
+	BuffFilter:OnTimer()
+end
+
+function BuffFilter:EnableSortingBtnUncheck(wndHandler, wndControl, eMouseButton)
+	log:info("Buff sorting unchecked")
+	self.bEnableSorting = false
 	BuffFilter:OnTimer()
 end
 
