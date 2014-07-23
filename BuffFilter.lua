@@ -373,10 +373,12 @@ function BuffFilter:SortStockBar(wndBuffBar)
 		
 			local nPrioA = tStatusA and tStatusA.nPriority or ePriority.Unset
 			local nPrioB = tStatusB and tStatusB.nPriority or ePriority.Unset
-			
+
+--[[			
 			if nPrioA == nil or nPrioB == nil then
 				log:warn("Error determining priority of buffs, nPrioA=%d, nPrioB=%d, strTooltipA=%s, strTooltipB=%s", tostring(nPrioA), tostring(nPrioB), tostring(strTooltipA), tostring(strTooltipB))
 			end
+]]
 			
 			return nPrioA < nPrioB
 		end
