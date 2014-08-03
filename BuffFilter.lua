@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {3, 0, 1}
+BuffFilter.ADDON_VERSION = {3, 1, 0}
 
 local log
 
@@ -168,11 +168,17 @@ function BuffFilter:OnDocLoaded()
 	self.wndSettings:FindChild("BuffsGroup"):Show(true, true)
 	self.wndSettings:FindChild("ConfigurationGroup"):Show(false, true)
 	
-	-- Restore saved data
+	-- Set default values
+	BuffFilter:SetDefaultValues()
+	
+	-- Override default values with saved data (if present)	
 	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
 	if not bStatus then 
 		log:warn("Failed to restore all savedata: %s", message)
 	end
+	
+	-- Update GUI with current values
+	self:UpdateSettingsGUI()
 				
 	-- Fire scanner once and start timer
 	BuffFilter:OnTimer()
@@ -338,22 +344,38 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 	
 	-- No buffs on buffbar? Just do nothing then.
 	if wndCurrentBuffs == nil then 
-		log:warn("No child windows on buffbar")
+		--log:warn("No child windows on buffbar")
 		return
 	end
 			
-	-- Buffs found, loop over them all, hide ones on todo list
+	-- Buffs icons found, loop over them all, hide marked ones
 	for _,wndCurrentBuff in ipairs(wndCurrentBuffs) do
-		local strBuffTooltip = wndCurrentBuff:GetBuffTooltip()
+		-- Default behaviour is to always show (or re-show hidden) buffs
+		local bShow = true
 		
-		if strBuffTooltip == nil or strBuffTooltip:len() <= 1 then
-			-- Certain buffs will have no tooltip message - just ignore these for now.
-			--log:debug("Buff with no tooltip encountered")
-		else
-			local bTooltipMarkedForHiding = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]			
-			local bShouldHide = bTooltipMarkedForHiding and not BuffFilter.bDisableHiding
-			wndCurrentBuff:Show(not bShouldHide)
-		end		
+		-- Only choose to hide (or keep hidden) buffs if hiding is enabled
+		-- (Currently, the only way to completely disable hiding is via hide-in-combat-only feature (while out of combat))
+		if BuffFilter.bDisableHiding == false then
+			-- Get tooltip for buff-icon currently being inspected
+			local strBuffTooltip = wndCurrentBuff:GetBuffTooltip()
+			
+			-- Certain buffs will have no tooltip message - just ignore these for now, only handle buffs with tooltip
+			if strBuffTooltip ~= nil and strBuffTooltip:len() > 0 then
+				-- Check if tooltip is marked for hiding
+				local bMarked = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
+				
+				-- Check if inverse-hiding flag is set, if so, flip the bMarked flag
+				if BuffFilter.bInverseFiltering[eBuffType] == true then
+					bMarked = not bMarked
+				end
+				
+				-- Finally, flip marked-for-hiding flag to match wnd:Show input
+				bShow = not bMarked
+			end
+		end
+
+		-- Show/hide current buff icon
+		wndCurrentBuff:Show(bShow)
 	end
 end
 
@@ -374,12 +396,6 @@ function BuffFilter:SortStockBar(wndBuffBar)
 			local nPrioA = tStatusA and tStatusA.nPriority or ePriority.Unset
 			local nPrioB = tStatusB and tStatusB.nPriority or ePriority.Unset
 
---[[			
-			if nPrioA == nil or nPrioB == nil then
-				log:warn("Error determining priority of buffs, nPrioA=%d, nPrioB=%d, strTooltipA=%s, strTooltipB=%s", tostring(nPrioA), tostring(nPrioB), tostring(strTooltipA), tostring(strTooltipB))
-			end
-]]
-			
 			return nPrioA < nPrioB
 		end
 	)
@@ -547,9 +563,11 @@ function BuffFilter:OnSave(eType)
 	local tSaveData = {}
 	tSaveData.addonVersion = self.ADDON_VERSION
 	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
-	tSaveData.nTimer = self.wndSettings:FindChild("Slider"):GetValue()
+	tSaveData.nTimer = self.nTimer
 	tSaveData.bOnlyHideInCombat = self.bOnlyHideInCombat
 	tSaveData.bEnableSorting = self.bEnableSorting
+	tSaveData.bInverseFiltering = self.bInverseFiltering
+	
 	return tSaveData	
 end
 
@@ -564,62 +582,79 @@ function BuffFilter:OnRestore(eType, tSavedData)
 	BuffFilter.tSavedData = tSavedData	
 end
 
--- Actual use of table stored in OnRestore is postponed until addon is fully loaded.
--- This func is called by On
-function BuffFilter:RestoreSaveData()
-	-- Assume OnRestore has placed actual save-data in self.tSavedData
-	if BuffFilter.tSavedData ~= nil and type(BuffFilter.tSavedData) == "table" then
-		log:info("Loading saved configuration")
+-- Called prior to loading saved settings. Ensures all fields have meaningful defaults
+function BuffFilter:SetDefaultValues()
+	-- Scanner interval timer (ms)
+	BuffFilter.nTimer = 3000
+	
+	-- Various config options
+	BuffFilter.bOnlyHideInCombat = false	
+	BuffFilter.bEnableSorting = true
+	
+	-- Inverse filtering table
+	BuffFilter.bInverseFiltering = {
+		[eBuffTypes.Buff] = false,
+		[eBuffTypes.Debuff] = false	
+	}	
+end
 
-		-- Register buffs from savedata
-		if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
-			for id,b in pairs(BuffFilter.tSavedData.tKnownBuffs) do
-				local bStatus, message = pcall(BuffFilter.RestoreSaveDataBuff, id, b)
-				if not bStatus then
-					log:warn("Error loading settings for a buff: %s", message)
-				end
-			end			
-		end
-		
-		-- Restore interval timer setting			
-		if type(BuffFilter.tSavedData.nTimer) == "number" then
-			BuffFilter.wndSettings:FindChild("Slider"):SetValue(BuffFilter.tSavedData.nTimer)
-		else
-			BuffFilter.wndSettings:FindChild("Slider"):SetValue(3000)
-		end
-		BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.wndSettings:FindChild("Slider"):GetValue()/1000))
-		
-		-- Restore "only hide in combat" flag
-		if type(BuffFilter.tSavedData.bOnlyHideInCombat) == "boolean" then
-			BuffFilter.bOnlyHideInCombat = BuffFilter.tSavedData.bOnlyHideInCombat
-		else
-			BuffFilter.bOnlyHideInCombat = false
-		end
-		BuffFilter.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
-		
-		-- Restore "enable priority sorting" flag
-		if type(BuffFilter.tSavedData.bEnableSorting) == "boolean" then
-			BuffFilter.bEnableSorting = BuffFilter.tSavedData.bEnableSorting
-		else
-			BuffFilter.bEnableSorting = true
-		end
-		BuffFilter.wndSettings:FindChild("EnableSortingBtn"):SetCheck(BuffFilter.bEnableSorting)
-		
-		-- Clear saved data object
-		BuffFilter.tSavedData = nil
-	else
+-- Called after restoring saved data. Updates all GUI elements.
+function BuffFilter:UpdateSettingsGUI()
+	-- Update timer value and label
+	BuffFilter.wndSettings:FindChild("Slider"):SetValue(BuffFilter.tSavedData.nTimer)
+	BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.nTimer/1000))
+	
+	BuffFilter.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
+	BuffFilter.wndSettings:FindChild("InverseBuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Buff])
+	BuffFilter.wndSettings:FindChild("InverseDebuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Debuff])
+	BuffFilter.wndSettings:FindChild("EnableSortingBtn"):SetCheck(BuffFilter.bEnableSorting)
+
+end
+
+-- Actual use of table stored in OnRestore is postponed until addon is fully loaded, 
+-- so GUI elements can be updated as well.
+function BuffFilter:RestoreSaveData()
+	
+	--[[ Override default values with savedata, when present ]]
+	
+	-- Assume OnRestore has placed actual save-data in self.tSavedData. Abort restore if no data is found.
+	if BuffFilter.tSavedData == nil or type(BuffFilter.tSavedData) ~= "table" then
 		log:info("No saved config found. First run?")
+		return
+	end
 		
-		-- Default timer value
-		BuffFilter.wndSettings:FindChild("Slider"):SetValue(3000)
-		BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.wndSettings:FindChild("Slider"):GetValue()/1000))
-		
-		-- Default checkbox values
-		BuffFilter.bOnlyHideInCombat = false
-		BuffFilter.bEnableSorting = true		
+	log:info("Loading saved configuration")
+	
+	-- Interval timer setting
+	BuffFilter.nTimer = type(BuffFilter.tSavedData.nTimer) == "number" and BuffFilter.tSavedData.nTimer or BuffFilter.nTimer
+	
+	-- Only hide in combat flag
+	BuffFilter.bOnlyHideInCombat = type(BuffFilter.tSavedData.bOnlyHideInCombat) == "boolean" and BuffFilter.tSavedData.bOnlyHideInCombat or BuffFilter.bOnlyHideInCombat
+
+	-- Enable sorting flag
+	BuffFilter.bEnableSorting = type(BuffFilter.tSavedData.bEnableSorting) == "boolean" and BuffFilter.tSavedData.bEnableSorting or BuffFilter.bEnableSorting
+	
+	-- Inverse buff/debuff filtering
+	if type(BuffFilter.tSavedData.bInverseFiltering) == "table" then
+		for _,eBuffType in pairs(eBuffTypes) do
+			if type(BuffFilter.tSavedData.bInverseFiltering[eBuffType]) == "boolean" then
+				BuffFilter.bInverseFiltering[eBuffType] = BuffFilter.tSavedData.bInverseFiltering[eBuffType]
+			end
+		end
+	end	
+
+	-- Register buffs from savedata
+	if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
+		for id,b in pairs(BuffFilter.tSavedData.tKnownBuffs) do
+			local bStatus, message = pcall(BuffFilter.RestoreSaveDataBuff, id, b)
+			if not bStatus then
+				log:warn("Error loading settings for a buff: %s", message)
+			end
+		end			
 	end
 end
 
+-- Restores saved buff-data for an individual buff.
 function BuffFilter.RestoreSaveDataBuff(id, b)
 	-- Sanity check each individual field
 	if type(b.nBaseSpellId) ~= "number" then error(string.format("Saved buff Id %d is missing nBaseSpellId number", id)) end
@@ -653,7 +688,7 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 			[eTargetTypes.Focus] = b.bHide[eTargetTypes.Focus],
 			[eTargetTypes.TargetOfTarget] = b.bHide[eTargetTypes.TargetOfTarget]
 		},
-		b.nPriority or ePriority.Unset
+		b.nPriority or ePriority.Unset -- Sort-priority may be missing, default to Unset
 	)
 end
 
@@ -744,9 +779,10 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 end
 
 function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
-	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", self.wndSettings:FindChild("Slider"):GetValue()/1000))
+	self.nTimer = fNewValue
+	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", self.nTimer/1000))
 	self.scanTimer:Stop()
-	self.scanTimer = ApolloTimer.Create(fNewValue/1000, true, "OnTimer", self)
+	self.scanTimer = ApolloTimer.Create(self.nTimer/1000, true, "OnTimer", self)
 end
 
 function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
@@ -779,32 +815,32 @@ function BuffFilter:OnTabBtn(wndHandler, wndControl)
 end
 
 
-function BuffFilter:InCombatBtnCheck(wndHandler, wndControl, eMouseButton )
-	log:info("In-combat only checked")
-	self.bOnlyHideInCombat = true
+function BuffFilter:InCombatBtnChange(wndHandler, wndControl, eMouseButton)
+	log:info("In-combat only " .. (wndControl:IsChecked() and "checked" or "unchecked"))
+	self.bOnlyHideInCombat = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
 
-function BuffFilter:InCombatBtnUncheck(wndHandler, wndControl, eMouseButton )
-	log:info("In-combat only unchecked")
-	self.bOnlyHideInCombat = false
+function BuffFilter:EnableSortingBtnChange(wndHandler, wndControl, eMouseButton)
+	log:info("Buff sorting " .. (wndControl:IsChecked() and "checked" or "unchecked"))
+	self.bEnableSorting = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
 
-function BuffFilter:EnableSortingBtnCheck(wndHandler, wndControl, eMouseButton)
-	log:info("Buff sorting checked")
-	self.bEnableSorting = true
+function BuffFilter:InverseBuffsBtnChange(wndHandler, wndControl, eMouseButton)
+	log:info("Inverse buff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
+	self.bInverseFiltering[eBuffTypes.Buff] = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
 
-function BuffFilter:EnableSortingBtnUncheck(wndHandler, wndControl, eMouseButton)
-	log:info("Buff sorting unchecked")
-	self.bEnableSorting = false
+function BuffFilter:InverseDebuffsBtnChange( wndHandler, wndControl, eMouseButton )
+	log:info("Inverse debuff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
+	self.bInverseFiltering[eBuffTypes.Debuff] = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
-
 
 function BuffFilter:OnUnitEnteredCombat(unit, bCombat)	
+	-- When player enters or exits combat, fire update
 	if unit:GetName() ~= GameLib.GetPlayerUnit():GetName() then return end
 	BuffFilter:OnTimer()
 end
@@ -832,22 +868,41 @@ end
 
 -- Checks if any supported addon is found, displays warning message overlay in settings if not
 function BuffFilter:CheckAddons()
-	for addon,_ in pairs(self.tBarProviders) do
-		if Apollo.GetAddon(addon) ~= nil then 
-			return 
+	-- For each supported addon, check if the Player/Buff bar can be found
+	local tSupportedAddons = {}
+	local bCheckPassed = false
+	for strProvider,provider in pairs(self.tBarProviders) do		
+		if Apollo.GetAddon(strProvider) == nil then 
+			BuffFilter:CheckAddon_AddLine(tSupportedAddons, strProvider, "Not installed")
+		else		
+			-- Supported addon installed, check Player Buff bar can be found
+			local bStatus, discoveryResult = pcall(
+				provider.fDiscoverBar, 
+				provider.tTargetType[eTargetTypes.Player],
+				provider.tBuffType[eBuffTypes.Buff])
+
+			if bStatus == true and discoveryResult ~= nil then
+				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strProvider, "OK") -- kinda pointless, wont be shown anyway
+				bCheckPassed = true
+			else
+				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strProvider, "Unsupported version")
+			end
 		end
 	end
 	
-	-- Build list of supported addons
-	local tSupportedAddons = {}
-	for k,_ in pairs(self.tBarProviders) do	tSupportedAddons[#tSupportedAddons+1] = k end
+	-- Convert list of supported addon (with status) to return-delimited list	
 	local strSupportedAddons = table.concat(tSupportedAddons, "\n")
-	
-	
+		
 	-- Show warning message
 	self.wndSettings:FindChild("GeneralDescription"):SetText("BuffFilter only works with the stock Unit Frames, or a specific list of replacement / additional Unit Frame addons.\n\nWithout one of the following addons installed, BuffFilter will simply not hide any buffs.")
-	self.wndSettings:FindChild("SupportedAddonList"):SetText(strSupportedAddons)
-	self.wndSettings:FindChild("WarningFrame"):Show(true, false)
+	self.wndSettings:FindChild("SupportedAddonList"):SetText(strSupportedAddons)	
+	self.wndSettings:FindChild("WarningFrame"):Show(not bCheckPassed, false)
+end
+
+function BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddon, strStatus)
+	local textColor = strStatus == "OK" and "xkcdBoringGreen" or "AddonError"
+	tSupportedAddons[#tSupportedAddons+1] = string.format("<P TextColor=\"%s\" Font=\"CRB_InterfaceLarge\" Align=\"Center\">%s (%s)</P>",
+		textColor, strAddon, strStatus)	
 end
 
 function BuffFilter:CloseWarningButton()
