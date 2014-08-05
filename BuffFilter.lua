@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {3, 1, 0}
+BuffFilter.ADDON_VERSION = {3, 1, 1}
 
 local log
 
@@ -626,13 +626,19 @@ function BuffFilter:RestoreSaveData()
 	log:info("Loading saved configuration")
 	
 	-- Interval timer setting
-	BuffFilter.nTimer = type(BuffFilter.tSavedData.nTimer) == "number" and BuffFilter.tSavedData.nTimer or BuffFilter.nTimer
+	if type(BuffFilter.tSavedData.nTimer) == "number" then
+		BuffFilter.nTimer = BuffFilter.tSavedData.nTimer
+	end
 	
 	-- Only hide in combat flag
-	BuffFilter.bOnlyHideInCombat = type(BuffFilter.tSavedData.bOnlyHideInCombat) == "boolean" and BuffFilter.tSavedData.bOnlyHideInCombat or BuffFilter.bOnlyHideInCombat
+	if type(BuffFilter.tSavedData.bOnlyHideInCombat) == "boolean" then
+		BuffFilter.bOnlyHideInCombat =  BuffFilter.tSavedData.bOnlyHideInCombat
+	end	
 
 	-- Enable sorting flag
-	BuffFilter.bEnableSorting = type(BuffFilter.tSavedData.bEnableSorting) == "boolean" and BuffFilter.tSavedData.bEnableSorting or BuffFilter.bEnableSorting
+	if type(BuffFilter.tSavedData.bEnableSorting) == "boolean" then
+		BuffFilter.bEnableSorting = BuffFilter.tSavedData.bEnableSorting
+	end	
 	
 	-- Inverse buff/debuff filtering
 	if type(BuffFilter.tSavedData.bInverseFiltering) == "table" then
