@@ -601,7 +601,7 @@ end
 -- Called after restoring saved data. Updates all GUI elements.
 function BuffFilter:UpdateSettingsGUI()
 	-- Update timer value and label
-	BuffFilter.wndSettings:FindChild("Slider"):SetValue(BuffFilter.tSavedData.nTimer)
+	BuffFilter.wndSettings:FindChild("Slider"):SetValue(BuffFilter.nTimer)
 	BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.nTimer/1000))
 	
 	BuffFilter.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
