@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {3, 1, 2}
+BuffFilter.ADDON_VERSION = {3, 2, 0}
 
 local log
 
@@ -241,6 +241,7 @@ end
 -- Scan all active buffs for hide-this-buff config
 function BuffFilter:OnTimer()
 	-- Determine if "only hide in combat" is enabled, and affects this pass
+	-- NB: Even if hiding is disabled, the pass must go on to re-show hidden buffs.
 	if self.bOnlyHideInCombat == true then
 		local pu = GameLib.GetPlayerUnit()
 		if pu ~= nil then
@@ -250,6 +251,36 @@ function BuffFilter:OnTimer()
 		self.bDisableHiding = false
 	end
 
+	-- Before filtering, check player char for unknown buffs to register
+	local playerBuffs = GameLib.GetPlayerUnit() and GameLib.GetPlayerUnit():GetBuffs()
+	if playerBuffs ~= nil then
+		local statusByTT = BuffFilter.tBuffStatusByTooltip
+		for _,bufftype in pairs(playerBuffs) do -- both buffs and debuffs		
+			for _,b in pairs(bufftype) do -- for each de/buff
+				if b ~= nil then
+					local tt = b.splEffect:GetFlavor()
+					if tt ~= nil and tt:len()>=1 and statusByTT[tt] == nil then				
+						-- Unknown buff encountered, learn it
+						local spl = b.splEffect
+						BuffFilter:RegisterBuff(
+							spl:GetBaseSpellId(),
+							spl:GetName(),	
+							tt,
+							spl:GetIcon(),		
+							spl:IsBeneficial(),
+							{	
+								[eTargetTypes.Player] = false,
+								[eTargetTypes.Target] = false,
+								[eTargetTypes.Focus] = false,
+								[eTargetTypes.TargetOfTarget] = false
+							},
+							ePriority.Unset)
+					end
+				end
+			end
+		end
+	end
+	
 	--log:debug("BuffFilter timer")
 	local tBarsToFilter = BuffFilter:GetBarsToFilter()
 	--log:debug("%d bars to scan identified", #tBarsToFilter)
