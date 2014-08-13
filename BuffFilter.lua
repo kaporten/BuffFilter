@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {3, 2, 0}
+BuffFilter.ADDON_VERSION = {3, 3, 0}
 
 local log
 
@@ -84,7 +84,8 @@ function BuffFilter:OnInitialize()
 			tTargetType = {
 				[eTargetTypes.Player] = "tPlayerFrame",
 				[eTargetTypes.Target] = "tTargetFrame",
-				[eTargetTypes.Focus] = "tFocusFrame"
+				[eTargetTypes.Focus] = "tFocusFrame",
+				[eTargetTypes.TargetOfTarget] = "tToTFrame"
 			},
 			tBuffType = {
 				[eBuffTypes.Buff] = "Good",
@@ -133,7 +134,7 @@ function BuffFilter:OnEnable()
 	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
 	
 	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.FATAL,
+		level = GeminiLogging.ERROR,
 		pattern = "%d %n %c %l - %m",
 		appender = "GeminiConsole"
 	})
@@ -155,7 +156,7 @@ function BuffFilter:OnDocLoaded()
 	-- Load settings form
 	if self.xmlDoc ~= nil and self.xmlDoc:IsLoaded() then
 		self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
-		if self.wndSettings == nil then
+		if self.wndSettings == nil then			
 			Apollo.AddAddonErrorText(self, "Could not load the Settings form.")
 			return
 		end		
@@ -174,7 +175,9 @@ function BuffFilter:OnDocLoaded()
 	-- Override default values with saved data (if present)	
 	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
 	if not bStatus then 
-		log:warn("Failed to restore all savedata: %s", message)
+		local errmsg = string.format("Error restoring settings:\n%s", message)
+		log:error(errmsg)
+		Apollo.AddAddonErrorText(self, errmsg)
 	end
 	
 	-- Update GUI with current values
@@ -645,6 +648,20 @@ end
 -- Actual use of table stored in OnRestore is postponed until addon is fully loaded, 
 -- so GUI elements can be updated as well.
 function BuffFilter:RestoreSaveData()
+
+	log:info("Loading saved configuration")
+	
+	-- Register buffs from savedata
+	if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
+		for id,b in pairs(BuffFilter.tSavedData.tKnownBuffs) do
+			local bStatus, message = pcall(BuffFilter.RestoreSaveDataBuff, id, b)
+			if not bStatus then
+				local errmsg = string.format("Error restoring settings for a buff:\n%s", message)
+				log:error(errmsg)
+				Apollo.AddAddonErrorText(BuffFilter, errmsg)
+			end
+		end			
+	end
 	
 	--[[ Override default values with savedata, when present ]]
 	
@@ -654,7 +671,6 @@ function BuffFilter:RestoreSaveData()
 		return
 	end
 		
-	log:info("Loading saved configuration")
 	
 	-- Interval timer setting
 	if type(BuffFilter.tSavedData.nTimer) == "number" then
@@ -679,16 +695,6 @@ function BuffFilter:RestoreSaveData()
 			end
 		end
 	end	
-
-	-- Register buffs from savedata
-	if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
-		for id,b in pairs(BuffFilter.tSavedData.tKnownBuffs) do
-			local bStatus, message = pcall(BuffFilter.RestoreSaveDataBuff, id, b)
-			if not bStatus then
-				log:warn("Error loading settings for a buff: %s", message)
-			end
-		end			
-	end
 end
 
 -- Restores saved buff-data for an individual buff.
@@ -741,8 +747,23 @@ function BuffFilter:OnConfigure()
 	-- Show settings window
 	self.wndSettings:Show(true, false)
 	
-	-- Show warning window?
+	-- Show incompatible addon warning window?
 	self:CheckAddons()
+
+	-- Show error window?
+	if self.errorMessages ~= nil and #self.errorMessages > 0 then
+		local msg = "Errors have occurred. Please report this incident to me on Curse. \n \n"
+		for i,e in ipairs(self.errorMessages) do
+			msg = msg .. string.format("Error #%d: %s \n \n", i, e)
+		end
+		self.wndSettings:FindChild("ErrorMessage"):SetText(msg)
+		
+		-- Clear, so that errors are only shown once? 
+		-- Nah, ppl might click it away and then not be able to report the error in detail.
+		--self.errorMessages = {}
+		
+		self.wndSettings:FindChild("ErrorFrame"):Show(true, true)
+	end
 end
 
 function BuffFilter:OnHideSettings()
