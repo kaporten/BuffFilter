@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {3, 3, 0}
+BuffFilter.ADDON_VERSION = {3, 3, 1}
 
 local log
 
@@ -623,7 +623,7 @@ function BuffFilter:SetDefaultValues()
 	
 	-- Various config options
 	BuffFilter.bOnlyHideInCombat = false	
-	BuffFilter.bEnableSorting = true
+	BuffFilter.bEnableSorting = false
 	
 	-- Inverse filtering table
 	BuffFilter.bInverseFiltering = {
