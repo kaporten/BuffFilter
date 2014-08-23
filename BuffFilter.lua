@@ -3,9 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {3, 3, 1}
-
-local log
+BuffFilter.ADDON_VERSION = {3, 3, 2}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -130,18 +128,6 @@ function BuffFilter:OnInitialize()
 end
 
 function BuffFilter:OnEnable()	
-	-- GeminiLogger options	
-	local GeminiLogging = Apollo.GetPackage("Gemini:Logging-1.2").tPackage
-	
-	log = GeminiLogging:GetLogger({
-		level = GeminiLogging.ERROR,
-		pattern = "%d %n %c %l - %m",
-		appender = "GeminiConsole"
-	})
-
-	BuffFilter.log = log -- store ref for GeminiConsole-access to loglevel
-	log:info("Initializing addon 'BuffFilter'")
-
 	-- Register events so buffs can be re-filtered outside of the timered schedule
 	Apollo.RegisterEventHandler("ChangeWorld", "OnTimer", self) -- on /reloadui and instance-changes	
 	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self) -- when entering/exiting combat
@@ -176,7 +162,7 @@ function BuffFilter:OnDocLoaded()
 	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
 	if not bStatus then 
 		local errmsg = string.format("Error restoring settings:\n%s", message)
-		log:error(errmsg)
+		--log:error(errmsg)
 		Apollo.AddAddonErrorText(self, errmsg)
 	end
 	
@@ -328,7 +314,7 @@ function BuffFilter:GetBarsToFilter()
 								-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
 								result[#result+1] = tFoundBar
 							else
-								log:warn("Unable to locate '%s/%s'-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
+								--log:warn("Unable to locate '%s/%s'-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
 							end
 						else
 							--log:debug("Provider '%s' does not support bar type '%s/%s'. Skipping.", strProvider, eTargetType, eBuffType)
@@ -370,7 +356,7 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 	
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
-		log:warn("Unable to filter bar, wndBuffBar input is nil")
+		--log:warn("Unable to filter bar, wndBuffBar input is nil")
 		return
 	end
 	
@@ -542,7 +528,7 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		return
 	end	
 	
-	log:info("Registering buff: '%s', priority: %s", strName, tostring(nPriority))
+	--log:info("Registering buff: '%s', priority: %s", strName, tostring(nPriority))
 	
 	-- Construct buff details table
 	local tBuffDetails = {
@@ -649,7 +635,7 @@ end
 -- so GUI elements can be updated as well.
 function BuffFilter:RestoreSaveData()
 
-	log:info("Loading saved configuration")
+	--log:info("Loading saved configuration")
 	
 	-- Register buffs from savedata
 	if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
@@ -657,7 +643,7 @@ function BuffFilter:RestoreSaveData()
 			local bStatus, message = pcall(BuffFilter.RestoreSaveDataBuff, id, b)
 			if not bStatus then
 				local errmsg = string.format("Error restoring settings for a buff:\n%s", message)
-				log:error(errmsg)
+				--log:error(errmsg)
 				Apollo.AddAddonErrorText(BuffFilter, errmsg)
 			end
 		end			
@@ -667,7 +653,7 @@ function BuffFilter:RestoreSaveData()
 	
 	-- Assume OnRestore has placed actual save-data in self.tSavedData. Abort restore if no data is found.
 	if BuffFilter.tSavedData == nil or type(BuffFilter.tSavedData) ~= "table" then
-		log:info("No saved config found. First run?")
+		--log:info("No saved config found. First run?")
 		return
 	end
 		
@@ -788,7 +774,7 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 				
 			-- Check if this buff has same tooltip
 			if tRowBuffDetails.strTooltip == strTooltip then
-				log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
+				--log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
 				tRowBuffDetails.bHide[eTargetType] = bUpdatedHide
 				self:SetGridRowStatus(r, eTargetType, bUpdatedHide)				
 			end
@@ -797,7 +783,7 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 		-- Also update the by-tooltip summary table to latest value	
 		BuffFilter.tBuffStatusByTooltip[strTooltip][eTargetType] = bUpdatedHide
 	elseif nColumn == 3 then
-		log:info("Toggling buff '%s' for all target types", tBuffDetails.strName)
+		--log:info("Toggling buff '%s' for all target types", tBuffDetails.strName)
 		-- Clicking name inverses all column selections
 		-- Do this the easy way - by simulating user input on each column
 		for t,c in pairs(self.tTargetToColumn) do
@@ -822,7 +808,7 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 				
 			-- Check if this buff has same tooltip
 			if tRowBuffDetails.strTooltip == strTooltip then
-				log:info("Setting priority for buff '%s' to %s", tRowBuffDetails.strName, tostring(nPriority))
+				--log:info("Setting priority for buff '%s' to %s", tRowBuffDetails.strName, tostring(nPriority))
 				tRowBuffDetails.nPriority = nPriority				
 				BuffFilter:SetGridRowPriority(r, nPriority)
 			end
@@ -865,7 +851,7 @@ end
 
 function BuffFilter:OnTabBtn(wndHandler, wndControl)	
 	local strFormName = self.tTabButtonToForm[wndControl:GetName()]
-	log:info("Showing Settings-tab '%s'", strFormName)
+	--log:info("Showing Settings-tab '%s'", strFormName)
 	
 	for _,child in pairs(self.wndSettings:FindChild("TabContentArea"):GetChildren()) do
 		child:Show(strFormName == child:GetName())
@@ -874,25 +860,25 @@ end
 
 
 function BuffFilter:InCombatBtnChange(wndHandler, wndControl, eMouseButton)
-	log:info("In-combat only " .. (wndControl:IsChecked() and "checked" or "unchecked"))
+	--log:info("In-combat only " .. (wndControl:IsChecked() and "checked" or "unchecked"))
 	self.bOnlyHideInCombat = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
 
 function BuffFilter:EnableSortingBtnChange(wndHandler, wndControl, eMouseButton)
-	log:info("Buff sorting " .. (wndControl:IsChecked() and "checked" or "unchecked"))
+	--log:info("Buff sorting " .. (wndControl:IsChecked() and "checked" or "unchecked"))
 	self.bEnableSorting = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
 
 function BuffFilter:InverseBuffsBtnChange(wndHandler, wndControl, eMouseButton)
-	log:info("Inverse buff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
+	--log:info("Inverse buff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
 	self.bInverseFiltering[eBuffTypes.Buff] = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
 
 function BuffFilter:InverseDebuffsBtnChange( wndHandler, wndControl, eMouseButton )
-	log:info("Inverse debuff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
+	--log:info("Inverse debuff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
 	self.bInverseFiltering[eBuffTypes.Debuff] = wndControl:IsChecked()
 	BuffFilter:OnTimer()
 end
