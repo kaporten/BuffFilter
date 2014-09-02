@@ -2,8 +2,8 @@
 require "Apollo"
 require "Window"
 
-local BuffFilter = Apollo.GetPackage("Gemini:Addon-1.1").tPackage:NewAddon("BuffFilter", true, {"ToolTips", "VikingTooltips"})
-BuffFilter.ADDON_VERSION = {3, 3, 2}
+local BuffFilter = {}
+BuffFilter.ADDON_VERSION = {3, 3, 3}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -24,7 +24,14 @@ local ePriority = {
 	Low = 9
 }
 
-function BuffFilter:OnInitialize()
+function BuffFilter:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    self.__index = self 
+    return o
+end
+
+function BuffFilter:Init()
 	-- Tables for criss-cross references of buffs & tooltips. May be initialized & populated during OnRestore.
 	self.tBuffsById = self.tBuffsById or {}
 	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
@@ -125,14 +132,11 @@ function BuffFilter:OnInitialize()
 		BuffsTabBtn = "BuffsGroup",
 		ConfigurationTabBtn = "ConfigurationGroup",
 	}
+	
+	Apollo.RegisterAddon(self, true, "BuffFilter", {"ToolTips", "VikingTooltips"})
 end
 
-function BuffFilter:OnEnable()	
-	-- Register events so buffs can be re-filtered outside of the timered schedule
-	Apollo.RegisterEventHandler("ChangeWorld", "OnTimer", self) -- on /reloadui and instance-changes	
-	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self) -- when entering/exiting combat
-	Apollo.RegisterEventHandler("TargetUnitChanged", "OnTargetUnitChanged", self) -- when changing target
-	
+function BuffFilter:OnLoad()	
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
 	self.xmlDoc:RegisterCallback("OnDocLoaded", self)
@@ -165,7 +169,7 @@ function BuffFilter:OnDocLoaded()
 		--log:error(errmsg)
 		Apollo.AddAddonErrorText(self, errmsg)
 	end
-	
+		
 	-- Update GUI with current values
 	self:UpdateSettingsGUI()
 				
@@ -179,6 +183,11 @@ function BuffFilter:OnDocLoaded()
 	-- Register slash command to display settings
 	Apollo.RegisterSlashCommand("bf", "OnConfigure", self)
 	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
+
+	-- Register events so buffs can be re-filtered outside of the timered schedule
+	Apollo.RegisterEventHandler("ChangeWorld", "OnTimer", self) -- on /reloadui and instance-changes	
+	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self) -- when entering/exiting combat
+	Apollo.RegisterEventHandler("TargetUnitChanged", "OnTargetUnitChanged", self) -- when changing target
 	
 	--self.wndSettings:Show(true, true)
 end
@@ -243,7 +252,7 @@ function BuffFilter:OnTimer()
 	-- Before filtering, check player char for unknown buffs to register
 	local playerBuffs = GameLib.GetPlayerUnit() and GameLib.GetPlayerUnit():GetBuffs()
 	if playerBuffs ~= nil then
-		local statusByTT = BuffFilter.tBuffStatusByTooltip
+		local statusByTT = self.tBuffStatusByTooltip
 		for _,bufftype in pairs(playerBuffs) do -- both buffs and debuffs		
 			for _,b in pairs(bufftype) do -- for each de/buff
 				if b ~= nil then
@@ -251,7 +260,7 @@ function BuffFilter:OnTimer()
 					if tt ~= nil and tt:len()>=1 and statusByTT[tt] == nil then				
 						-- Unknown buff encountered, learn it
 						local spl = b.splEffect
-						BuffFilter:RegisterBuff(
+						self:RegisterBuff(
 							spl:GetBaseSpellId(),
 							spl:GetName(),	
 							tt,
@@ -271,7 +280,7 @@ function BuffFilter:OnTimer()
 	end
 	
 	--log:debug("BuffFilter timer")
-	local tBarsToFilter = BuffFilter:GetBarsToFilter()
+	local tBarsToFilter = self:GetBarsToFilter()
 	--log:debug("%d bars to scan identified", #tBarsToFilter)
 	
 	for _,b in ipairs(tBarsToFilter) do		
@@ -279,8 +288,8 @@ function BuffFilter:OnTimer()
 		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
 		b.fFilterBar(b.bar, b.eTargetType, b.eBuffType)
 		
-		if BuffFilter.bEnableSorting == true then
-			BuffFilter:SortStockBar(b.bar)
+		if self.bEnableSorting == true then
+			self:SortStockBar(b.bar)
 		end
 	end
 end
@@ -621,20 +630,18 @@ end
 -- Called after restoring saved data. Updates all GUI elements.
 function BuffFilter:UpdateSettingsGUI()
 	-- Update timer value and label
-	BuffFilter.wndSettings:FindChild("Slider"):SetValue(BuffFilter.nTimer)
-	BuffFilter.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.nTimer/1000))
+	self.wndSettings:FindChild("Slider"):SetValue(BuffFilter.nTimer)
+	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.nTimer/1000))
 	
-	BuffFilter.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
-	BuffFilter.wndSettings:FindChild("InverseBuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Buff])
-	BuffFilter.wndSettings:FindChild("InverseDebuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Debuff])
-	BuffFilter.wndSettings:FindChild("EnableSortingBtn"):SetCheck(BuffFilter.bEnableSorting)
-
+	self.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
+	self.wndSettings:FindChild("InverseBuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Buff])
+	self.wndSettings:FindChild("InverseDebuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Debuff])
+	self.wndSettings:FindChild("EnableSortingBtn"):SetCheck(BuffFilter.bEnableSorting)
 end
 
 -- Actual use of table stored in OnRestore is postponed until addon is fully loaded, 
 -- so GUI elements can be updated as well.
 function BuffFilter:RestoreSaveData()
-
 	--log:info("Loading saved configuration")
 	
 	-- Register buffs from savedata
@@ -952,3 +959,6 @@ end
 function BuffFilter:CloseWarningButton()
 	self.wndSettings:FindChild("WarningFrame"):Show(false, true)
 end
+
+
+BuffFilter:Init()
