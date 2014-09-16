@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 3, 3}
+BuffFilter.ADDON_VERSION = {3, 4, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -112,7 +112,21 @@ function BuffFilter:Init()
 				[eBuffTypes.Buff] = "BeneBuffBar",
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
-		},		
+		},
+
+		["KuronaFrames"] = {
+			fDiscoverBar = BuffFilter.FindBarKuronaFrames,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "playerFrame",
+				[eTargetTypes.Target] = "targetFrame",
+				[eTargetTypes.Focus] = "focusFrame"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BeneBuffBar",
+				[eBuffTypes.Debuff] = "HarmBuffBar"
+			},
+		},
 	}
 	
 	-- Mapping tables for the Grids column-to-targettype translation
@@ -490,6 +504,23 @@ function BuffFilter.FindBarFastTargetFrames(strTargetType, strBuffType)
 	if bar == nil then 
 		error("Bar not found")
 	end	
+	
+	return bar
+end
+
+-- Kurona Frames finder
+function BuffFilter.FindBarKuronaFrames(strTargetType, strBuffType)   
+	local KF = Apollo.GetAddon("KuronaFrames")
+	if KF == nil then
+		error("Addon 'KuronaFrames' not found")
+	end
+	
+	local targetFrame = KF[strTargetType]
+	local bar = targetFrame:FindChild(strBuffType)
+	
+	if bar == nil then
+		error("Bar not found")
+	end
 	
 	return bar
 end
