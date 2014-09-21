@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 5, 0}
+BuffFilter.ADDON_VERSION = {3, 6, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -53,7 +53,7 @@ function BuffFilter:Init()
 			},
 		},
 
-		-- Potato UI
+		-- Potato UI 2.7
 		["PotatoFrames"] = {
 			fDiscoverBar = BuffFilter.FindBarPotatoUI,
 			fFilterBar = BuffFilter.FilterStockBar,
@@ -66,6 +66,22 @@ function BuffFilter:Init()
 			tBuffType = {
 				[eBuffTypes.Buff] = "BeneBuffBar",
 				[eBuffTypes.Debuff] = "HarmBuffBar"
+			},
+		},		
+		
+		-- Potato UI 2.8
+		["PotatoBuffs"] = {
+			fDiscoverBar = BuffFilter.FindBarPotatoBuffs,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "luaPlayer",
+				[eTargetTypes.Target] = "luaTarget",
+				[eTargetTypes.Focus] = "luaFocus",
+				[eTargetTypes.TargetOfTarget] = "luaToT"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "Buffs",
+				[eBuffTypes.Debuff] = "Debuffs"
 			},
 		},		
 		
@@ -414,7 +430,7 @@ function BuffFilter:SortStockBar(wndBuffBar)
 	)
 end
 
--- PotatoUI-specific bar search
+-- PotatoUI 2.7 specific bar search (remove once 2.8 has been live for a while?)
 function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	local PUI = Apollo.GetAddon("PotatoFrames")
 	if PUI == nil then 
@@ -425,11 +441,26 @@ function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
 	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".	
 	local strSubframe = strBuffType == BuffFilter.tBarProviders["PotatoFrames"].tBuffType[eBuffTypes.Buff] and "buffs" or "debuffs"
 	
-	for _,frame in ipairs(PUI.tFrames) do
+	for _,frame in ipairs(PUI.tFrames) do		
 		if frame.frameData.name == strTargetType then
 			return frame[strSubframe]:FindChild(strBuffType)
 		end
 	end
+end
+
+-- PotatoUI 2.8+ specific bar search
+function BuffFilter.FindBarPotatoBuffs(strTargetType, strBuffType)
+	local PB = Apollo.GetAddon("PotatoBuffs")
+	if PB == nil then 
+		error("Addon 'PotatoBuffs' not installed")
+	end
+
+	local bar = PB[strTargetType .. strBuffType].wndBuffs:FindChild("Buffs")
+	if bar == nil then 		
+		error("Bar not found")
+	end
+	
+	return bar
 end
 
 -- SimplebuffBar-specific bar search
