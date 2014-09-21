@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 4, 0}
+BuffFilter.ADDON_VERSION = {3, 5, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -262,36 +262,6 @@ function BuffFilter:OnTimer()
 	else
 		self.bDisableHiding = false
 	end
-
-	-- Before filtering, check player char for unknown buffs to register
-	local playerBuffs = GameLib.GetPlayerUnit() and GameLib.GetPlayerUnit():GetBuffs()
-	if playerBuffs ~= nil then
-		local statusByTT = self.tBuffStatusByTooltip
-		for _,bufftype in pairs(playerBuffs) do -- both buffs and debuffs		
-			for _,b in pairs(bufftype) do -- for each de/buff
-				if b ~= nil then
-					local tt = b.splEffect:GetFlavor()
-					if tt ~= nil and tt:len()>=1 and statusByTT[tt] == nil then				
-						-- Unknown buff encountered, learn it
-						local spl = b.splEffect
-						self:RegisterBuff(
-							spl:GetBaseSpellId(),
-							spl:GetName(),	
-							tt,
-							spl:GetIcon(),		
-							spl:IsBeneficial(),
-							{	
-								[eTargetTypes.Player] = false,
-								[eTargetTypes.Target] = false,
-								[eTargetTypes.Focus] = false,
-								[eTargetTypes.TargetOfTarget] = false
-							},
-							ePriority.Unset)
-					end
-				end
-			end
-		end
-	end
 	
 	--log:debug("BuffFilter timer")
 	local tBarsToFilter = self:GetBarsToFilter()
@@ -540,7 +510,6 @@ end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
 function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide, nPriority)
-	--log:debug("RegisterBuff called")
 	-- Assume the two buff tables are in sync, and just check for presence in the first
 	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then	
 		-- Buff already known, do nothing
@@ -991,5 +960,12 @@ function BuffFilter:CloseWarningButton()
 	self.wndSettings:FindChild("WarningFrame"):Show(false, true)
 end
 
+function BuffFilter:OnResetButton(wndHandler, wndControl, eMouseButton)
+	self.tBuffsById = {}
+	self.tBuffStatusByTooltip = {}
+	self:SetDefaultValues()
+	self.wndSettings:FindChild("Grid"):DeleteAll()
+	self:UpdateSettingsGUI()
+end
 
 BuffFilter:Init()
