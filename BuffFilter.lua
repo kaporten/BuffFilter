@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 6, 0}
+BuffFilter.ADDON_VERSION = {3, 7, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -674,6 +674,12 @@ end
 -- so GUI elements can be updated as well.
 function BuffFilter:RestoreSaveData()
 	--log:info("Loading saved configuration")
+
+	-- Assume OnRestore has placed actual save-data in self.tSavedData. Abort restore if no data is found.
+	if BuffFilter.tSavedData == nil or type(BuffFilter.tSavedData) ~= "table" then
+		Print("No saved BuffFilter configuration found. First run?")
+		return
+	end
 	
 	-- Register buffs from savedata
 	if type(BuffFilter.tSavedData.tKnownBuffs) == "table" then
@@ -687,14 +693,7 @@ function BuffFilter:RestoreSaveData()
 		end			
 	end
 	
-	--[[ Override default values with savedata, when present ]]
-	
-	-- Assume OnRestore has placed actual save-data in self.tSavedData. Abort restore if no data is found.
-	if BuffFilter.tSavedData == nil or type(BuffFilter.tSavedData) ~= "table" then
-		--log:info("No saved config found. First run?")
-		return
-	end
-		
+	--[[ Override default values with savedata, when present ]]	
 	
 	-- Interval timer setting
 	if type(BuffFilter.tSavedData.nTimer) == "number" then
