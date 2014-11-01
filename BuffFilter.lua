@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 7, 0}
+BuffFilter.ADDON_VERSION = {3, 8, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -137,6 +137,20 @@ function BuffFilter:Init()
 				[eTargetTypes.Player] = "playerFrame",
 				[eTargetTypes.Target] = "targetFrame",
 				[eTargetTypes.Focus] = "focusFrame"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BeneBuffBar",
+				[eBuffTypes.Debuff] = "HarmBuffBar"
+			},
+		},
+		
+		["AlterFrame"] = {
+			fDiscoverBar = BuffFilter.FindAlterFrame,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "wndMain",
+				[eTargetTypes.Target] = "wndTarget",
+				[eTargetTypes.Focus] = "wndFocus"
 			},
 			tBuffType = {
 				[eBuffTypes.Buff] = "BeneBuffBar",
@@ -525,6 +539,24 @@ function BuffFilter.FindBarKuronaFrames(strTargetType, strBuffType)
 	
 	return bar
 end
+
+-- AlterFrame finder
+function BuffFilter.FindAlterFrame(strTargetType, strBuffType)   
+	local AF = Apollo.GetAddon("AlterFrame")
+	if AF == nil then
+		error("Addon 'AlterFrame' not found")
+	end
+	
+	local targetFrame = AF[strTargetType]
+	local bar = targetFrame:FindChild(strBuffType)
+	
+	if bar == nil then
+		error("Bar not found")
+	end
+	
+	return bar
+end
+
 
 -- When target changes, schedule a near-immediate buff filtering.
 function BuffFilter:OnTargetUnitChanged(unitTarget)
