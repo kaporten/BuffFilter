@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 9, 0}
+BuffFilter.ADDON_VERSION = {3, 8, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
