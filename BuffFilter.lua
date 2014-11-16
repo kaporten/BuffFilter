@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 8, 0}
+BuffFilter.ADDON_VERSION = {3, 9, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -157,6 +157,21 @@ function BuffFilter:Init()
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
 		},
+		
+		["CandyUI_UnitFrames"] = {
+			fDiscoverBar = BuffFilter.FindCandyUIUnitFrame,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "wndPlayerUF",
+				[eTargetTypes.Target] = "wndTargetUF",
+				[eTargetTypes.Focus] = "wndFocusUF",
+				[eTargetTypes.TargetOfTarget] = "wndToTUF"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BuffContainerWindow",
+				[eBuffTypes.Debuff] = "DebuffContainerWindow"
+			},
+		},		
 	}
 	
 	-- Mapping tables for the Grids column-to-targettype translation
@@ -548,6 +563,23 @@ function BuffFilter.FindAlterFrame(strTargetType, strBuffType)
 	end
 	
 	local targetFrame = AF[strTargetType]
+	local bar = targetFrame:FindChild(strBuffType)
+	
+	if bar == nil then
+		error("Bar not found")
+	end
+	
+	return bar
+end
+
+-- CandyUI finder
+function BuffFilter.FindCandyUIUnitFrame(strTargetType, strBuffType)   
+	local CUI = Apollo.GetAddon("CandyUI_UnitFrames")
+	if CUI == nil then
+		error("Addon 'CandyUI_UnitFrames' not found")
+	end
+	
+	local targetFrame = CUI[strTargetType]
 	local bar = targetFrame:FindChild(strBuffType)
 	
 	if bar == nil then
