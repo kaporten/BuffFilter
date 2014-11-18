@@ -3,7 +3,7 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 8, 0}
+BuffFilter.ADDON_VERSION = {3, 9, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -40,7 +40,10 @@ function BuffFilter:Init()
 	self.tBarProviders = {
 		-- Stock UI
 		["TargetFrame"] = {
-			fDiscoverBar = BuffFilter.FindBarStockUI,
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
+				end,
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaUnitFrame",
@@ -52,26 +55,13 @@ function BuffFilter:Init()
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
 		},
-
-		-- Potato UI 2.7
-		["PotatoFrames"] = {
-			fDiscoverBar = BuffFilter.FindBarPotatoUI,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "Player Frame",
-				[eTargetTypes.Target] = "Target Frame",
-				[eTargetTypes.Focus] = "Focus Frame",
-				[eTargetTypes.TargetOfTarget] = "ToT Frame"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BeneBuffBar",
-				[eBuffTypes.Debuff] = "HarmBuffBar"
-			},
-		},		
 		
 		-- Potato UI 2.8
 		["PotatoBuffs"] = {
-			fDiscoverBar = BuffFilter.FindBarPotatoBuffs,
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType .. strBuffType].wndBuffs:FindChild("Buffs")
+				end,
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaPlayer",
@@ -87,7 +77,10 @@ function BuffFilter:Init()
 		
 		-- SimpleBuffBar
 		["SimpleBuffBar"] = {
-			fDiscoverBar = BuffFilter.FindBarSimpleBuffBarUI,
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider.bars[strTargetType .. strBuffType]
+				end,
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "Player",
@@ -102,6 +95,11 @@ function BuffFilter:Init()
 		
 		-- Viking Unit Frames
 		["VikingUnitFrames"] = {
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType].wndUnitFrame:FindChild(strBuffType)
+				end,
+			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "tPlayerFrame",
 				[eTargetTypes.Target] = "tTargetFrame",
@@ -112,12 +110,13 @@ function BuffFilter:Init()
 				[eBuffTypes.Buff] = "Good",
 				[eBuffTypes.Debuff] = "Bad"
 			},		
-			fDiscoverBar = BuffFilter.FindBarVikingUnitFrames,
-			fFilterBar = BuffFilter.FilterStockBar,
 		},
 		
 		["FastTargetFrame"] = {
-			fDiscoverBar = BuffFilter.FindBarFastTargetFrames,
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
+				end,
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaUnitFrame",
@@ -131,7 +130,10 @@ function BuffFilter:Init()
 		},
 
 		["KuronaFrames"] = {
-			fDiscoverBar = BuffFilter.FindBarKuronaFrames,
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType]:FindChild(strBuffType)
+				end,
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "playerFrame",
@@ -145,7 +147,10 @@ function BuffFilter:Init()
 		},
 		
 		["AlterFrame"] = {
-			fDiscoverBar = BuffFilter.FindAlterFrame,
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType]:FindChild(strBuffType)
+				end,
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "wndMain",
@@ -159,7 +164,10 @@ function BuffFilter:Init()
 		},
 		
 		["CandyUI_UnitFrames"] = {
-			fDiscoverBar = BuffFilter.FindCandyUIUnitFrame,
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType]:FindChild(strBuffType)
+				end,
 			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "wndPlayerUF",
@@ -308,9 +316,7 @@ function BuffFilter:OnTimer()
 		self.bDisableHiding = false
 	end
 	
-	--log:debug("BuffFilter timer")
 	local tBarsToFilter = self:GetBarsToFilter()
-	--log:debug("%d bars to scan identified", #tBarsToFilter)
 	
 	for _,b in ipairs(tBarsToFilter) do		
 		-- Call provider-specific filter function.
@@ -329,8 +335,9 @@ function BuffFilter:GetBarsToFilter()
 
 	-- For every provider/target/bufftype combination,
 	-- call each provider-specific function to scan for the bar
-	for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do		
-		if Apollo.GetAddon(strProvider) ~= nil then 
+	for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do
+		local addonProvider = Apollo.GetAddon(strProvider)
+		if addonProvider ~= nil then 
 			for _,eTargetType in pairs(eTargetTypes) do
 				local strBarTypeParam = tProviderDetails.tTargetType[eTargetType]
 				if strBarTypeParam ~= nil then
@@ -338,52 +345,27 @@ function BuffFilter:GetBarsToFilter()
 						local strBuffTypeParam = tProviderDetails.tBuffType[eBuffType]
 						if strBuffTypeParam ~= nil then																	
 							-- Safe call provider-specific discovery function
-							--log:debug("Scanning for '%s/%s'-bar on provider='%s'. Provider parameters: strBarTypeParam='%s' strBuffTypeParam='%s'", eTargetType, eBuffType, strProvider, strBarTypeParam, strBuffTypeParam)
-							local bStatus, discoveryResult = pcall(tProviderDetails.fDiscoverBar, strBarTypeParam, strBuffTypeParam)					
-							if bStatus == true and discoveryResult ~= nil then
+							local bStatus, foundBar = pcall(tProviderDetails.fDiscoverBar, addonProvider, strBarTypeParam, strBuffTypeParam)					
+							if bStatus == true and foundBar ~= nil then
 								-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
-								--log:debug("%s/%s-bar found for provider '%s'", eTargetType, eBuffType, strProvider)							
-								local tFoundBar = {
+								local tFoundBar = {									
 									eTargetType = eTargetType,					-- Target-type (Player, Target, Focus etc)
 									eBuffType = eBuffType,						-- Buff type (Buffs or Debuffs)
 									fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
-									bar = discoveryResult,						-- Reference to actual bar instance							
+									addonProvider = addonProvider,				-- Addon which provides the bar to filter
+									bar = foundBar,								-- Reference to actual bar instance
 								}
 								-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
 								result[#result+1] = tFoundBar
-							else
-								--log:warn("Unable to locate '%s/%s'-bar for provider '%s': %s", eTargetType, eBuffType, strProvider, tostring(discoveryResult))
 							end
-						else
-							--log:debug("Provider '%s' does not support bar type '%s/%s'. Skipping.", strProvider, eTargetType, eBuffType)
 						end
 					end
-				else
-					--log:debug("Provider '%s' does not support bar type '%s'. Skipping.", strProvider, eTargetType, eBuffType)
 				end
 			end
-		else
-			--log:info("Provider '%s' not found, skipping.", strProvider)
 		end
 	end	
 	
 	return result
-end
-
--- Stock UI-specific bar search
-function BuffFilter.FindBarStockUI(strTargetType, strBuffType)	
-	local TF = Apollo.GetAddon("TargetFrame")
-	if TF == nil then 
-		error("Addon 'TargetFrame' not found")
-	end	
-	
-	local targetFrame = TF[strTargetType]
-	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)	
-	if bar == nil then 
-		error("Bar not found")
-	end	
-	
-	return bar
 end
 
 -- Function for filtering buffs from any stock buff-bar. 
@@ -458,137 +440,6 @@ function BuffFilter:SortStockBar(wndBuffBar)
 		end
 	)
 end
-
--- PotatoUI 2.7 specific bar search (remove once 2.8 has been live for a while?)
-function BuffFilter.FindBarPotatoUI(strTargetType, strBuffType)
-	local PUI = Apollo.GetAddon("PotatoFrames")
-	if PUI == nil then 
-		error("Addon 'PotatoFrames' not installed")
-	end
-
-	-- PotatoUI stores the actual buff bar as a sub-element called "buffs" or "debuffs".
-	-- So translate "BeneBuffBar"->"buffs" and "HarmBuffBar"->"debuffs".	
-	local strSubframe = strBuffType == BuffFilter.tBarProviders["PotatoFrames"].tBuffType[eBuffTypes.Buff] and "buffs" or "debuffs"
-	
-	for _,frame in ipairs(PUI.tFrames) do		
-		if frame.frameData.name == strTargetType then
-			return frame[strSubframe]:FindChild(strBuffType)
-		end
-	end
-end
-
--- PotatoUI 2.8+ specific bar search
-function BuffFilter.FindBarPotatoBuffs(strTargetType, strBuffType)
-	local PB = Apollo.GetAddon("PotatoBuffs")
-	if PB == nil then 
-		error("Addon 'PotatoBuffs' not installed")
-	end
-
-	local bar = PB[strTargetType .. strBuffType].wndBuffs:FindChild("Buffs")
-	if bar == nil then 		
-		error("Bar not found")
-	end
-	
-	return bar
-end
-
--- SimplebuffBar-specific bar search
-function BuffFilter.FindBarSimpleBuffBarUI(strTargetType, strBuffType)   
-	local SBB = Apollo.GetAddon("SimpleBuffBar")
-	if SBB == nil then 
-		error("Addon 'SimpleBuffBar' not installed")
-	end
-	
-	local bar = SBB.bars[strTargetType .. strBuffType]   
-	if bar == nil then 
-		error("Bar not found")
-	end
-	
-	return bar
-end
-
--- Viking Unit Frames finder
-function BuffFilter.FindBarVikingUnitFrames(strTargetType, strBuffType)
-	local VTF = Apollo.GetAddon("VikingUnitFrames")
-	if VTF == nil then
-		error("Addon 'VikingUnitFrames' not installed")
-	end
-	
-	local bar = VTF[strTargetType].wndUnitFrame:FindChild(strBuffType)
-	if bar == nil then
-		error("Bar not found")
-	end
-	
-	return bar
-end
-
--- Fast Target Frames finder
-function BuffFilter.FindBarFastTargetFrames(strTargetType, strBuffType)	
-	local FTF = Apollo.GetAddon("FastTargetFrame")
-	if FTF == nil then 
-		error("Addon 'FastTargetFrame' not found")
-	end	
-	
-	local targetFrame = FTF[strTargetType]
-	local bar = targetFrame.wndMainClusterFrame:FindChild(strBuffType)	
-	if bar == nil then 
-		error("Bar not found")
-	end	
-	
-	return bar
-end
-
--- Kurona Frames finder
-function BuffFilter.FindBarKuronaFrames(strTargetType, strBuffType)   
-	local KF = Apollo.GetAddon("KuronaFrames")
-	if KF == nil then
-		error("Addon 'KuronaFrames' not found")
-	end
-	
-	local targetFrame = KF[strTargetType]
-	local bar = targetFrame:FindChild(strBuffType)
-	
-	if bar == nil then
-		error("Bar not found")
-	end
-	
-	return bar
-end
-
--- AlterFrame finder
-function BuffFilter.FindAlterFrame(strTargetType, strBuffType)   
-	local AF = Apollo.GetAddon("AlterFrame")
-	if AF == nil then
-		error("Addon 'AlterFrame' not found")
-	end
-	
-	local targetFrame = AF[strTargetType]
-	local bar = targetFrame:FindChild(strBuffType)
-	
-	if bar == nil then
-		error("Bar not found")
-	end
-	
-	return bar
-end
-
--- CandyUI finder
-function BuffFilter.FindCandyUIUnitFrame(strTargetType, strBuffType)   
-	local CUI = Apollo.GetAddon("CandyUI_UnitFrames")
-	if CUI == nil then
-		error("Addon 'CandyUI_UnitFrames' not found")
-	end
-	
-	local targetFrame = CUI[strTargetType]
-	local bar = targetFrame:FindChild(strBuffType)
-	
-	if bar == nil then
-		error("Bar not found")
-	end
-	
-	return bar
-end
-
 
 -- When target changes, schedule a near-immediate buff filtering.
 function BuffFilter:OnTargetUnitChanged(unitTarget)
@@ -1022,7 +873,8 @@ function BuffFilter:CheckAddons()
 		else		
 			-- Supported addon installed, check Player Buff bar can be found
 			local bStatus, discoveryResult = pcall(
-				provider.fDiscoverBar, 
+				provider.fDiscoverBar,
+				Apollo.GetAddon(strProvider),
 				provider.tTargetType[eTargetTypes.Player],
 				provider.tBuffType[eBuffTypes.Buff])
 
