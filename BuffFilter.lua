@@ -179,6 +179,23 @@ function BuffFilter:Init()
 				[eBuffTypes.Buff] = "BuffContainerWindow",
 				[eBuffTypes.Debuff] = "DebuffContainerWindow"
 			},
+		},
+		
+		["ForgeUI_UnitFrames"] = {
+			fDiscoverBar =
+				function(addonProvider, strTargetType, strBuffType)
+					return addonProvider[strTargetType .. strBuffType]
+				end,
+			fFilterBar = BuffFilter.FilterStockBar,
+			tTargetType = {
+				[eTargetTypes.Player] = "wndPlayer",
+				[eTargetTypes.Target] = "wndTarget",
+				[eTargetTypes.Focus] = "wndFocus"
+			},
+			tBuffType = {
+				[eBuffTypes.Buff] = "BuffFrame",
+				[eBuffTypes.Debuff] = "DebuffFrame"
+			},
 		},		
 	}
 	
