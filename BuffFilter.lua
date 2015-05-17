@@ -273,6 +273,13 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self) -- when entering/exiting combat
 	Apollo.RegisterEventHandler("TargetUnitChanged", "OnTargetUnitChanged", self) -- when changing target
 	
+	-- New Buff update events
+	---[[
+	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
+	Apollo.RegisterEventHandler("BuffUpdated", "OnBuffUpdated", self)
+	Apollo.RegisterEventHandler("BuffRemoved", "OnBuffRemoved", self)
+	--]]
+	
 	--self.wndSettings:Show(true, true)
 end
 
@@ -929,6 +936,22 @@ function BuffFilter:OnResetButton(wndHandler, wndControl, eMouseButton)
 	self:SetDefaultValues()
 	self.wndSettings:FindChild("Grid"):DeleteAll()
 	self:UpdateSettingsGUI()
+end
+
+function BuffFilter:OnBuffAdded(unit, tBuff)
+	if unit ~= nil and unit:IsThePlayer() then		
+		BuffFilter.buffAddedTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
+	end
+end
+function BuffFilter:OnBuffUpdated(unit, tBuff)
+	if unit ~= nil and unit:IsThePlayer() then
+		BuffFilter.buffUpdatedTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
+	end
+end
+function BuffFilter:OnBuffRemoved(unit, tBuff)	
+	if unit ~= nil and unit:IsThePlayer() then
+		BuffFilter.buffRemovedTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
+	end
 end
 
 BuffFilter:Init()
