@@ -274,7 +274,7 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterEventHandler("TargetUnitChanged", "OnTargetUnitChanged", self) -- when changing target
 	
 	-- New Buff update events
-	---[[
+	--[[
 	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
 	Apollo.RegisterEventHandler("BuffUpdated", "OnBuffUpdated", self)
 	Apollo.RegisterEventHandler("BuffRemoved", "OnBuffRemoved", self)
@@ -938,6 +938,7 @@ function BuffFilter:OnResetButton(wndHandler, wndControl, eMouseButton)
 	self:UpdateSettingsGUI()
 end
 
+--[[ For now, only react to player buff updates. Retrigger update in 0.1s, when buffs have been drawn. --]]
 function BuffFilter:OnBuffAdded(unit, tBuff)
 	if unit ~= nil and unit:IsThePlayer() then		
 		BuffFilter.buffAddedTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
