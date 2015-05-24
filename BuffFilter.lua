@@ -618,7 +618,7 @@ end
 function BuffFilter:SetDefaultValues()
 	self.tSettings = {}
 	self.tSettings.nTimerDelay = 0
-	self.tSettings.nTimerCooldown = 0
+	self.tSettings.nTimerCooldown = 1000
 	
 	-- Various config options
 	self.tSettings.bOnlyHideInCombat = false	
