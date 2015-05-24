@@ -339,6 +339,7 @@ function BuffFilter:ScheduleFilter(bOverrideCooldown)
 		self.bScheduleExtraFiltering = true
 	else
 		-- No pending scheduled filter, no cooldown. Schedule filtering.
+		-- Use a timer even if nTimerDelay is 0. This allows other event-driven processes to finish up their work (such as actually constructing the buff icon) before it is filtered.
 		self.timerDelay = ApolloTimer.Create(self.tSettings.nTimerDelay/1000, false, "ExecuteScheduledFilter", BuffFilter)		
 	end
 end
@@ -349,7 +350,13 @@ function BuffFilter:ExecuteScheduledFilter()
 
 	-- Start cooldown timer
 	self.timerDelay = nil
-	self.timerCooldown = ApolloTimer.Create(self.tSettings.nTimerCooldown/1000, false, "OnCooldownFinished", BuffFilter)
+	
+	-- No cooldown? No need for a timer then.
+	if self.tSettings.nTimerCooldown == 0 then
+		self:OnCooldownFinished()
+	else
+		self.timerCooldown = ApolloTimer.Create(self.tSettings.nTimerCooldown/1000, false, "OnCooldownFinished", BuffFilter)
+	end
 end
 
 function BuffFilter:OnCooldownFinished()
@@ -610,8 +617,8 @@ end
 -- Called prior to loading saved settings. Ensures all fields have meaningful defaults
 function BuffFilter:SetDefaultValues()
 	self.tSettings = {}
-	self.tSettings.nTimerDelay = 200
-	self.tSettings.nTimerCooldown = 3000
+	self.tSettings.nTimerDelay = 0
+	self.tSettings.nTimerCooldown = 0
 	
 	-- Various config options
 	self.tSettings.bOnlyHideInCombat = false	
