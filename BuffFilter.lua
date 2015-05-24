@@ -1,4 +1,7 @@
-
+--[[
+	BuffFilter by porten.
+	Comments/suggestions/bug reports welcome, find me on Curse or porten@gmail.com
+--]]
 require "Apollo"
 require "Window"
 
@@ -322,7 +325,7 @@ function BuffFilter:OnDependencyError()
 end
 
 function BuffFilter:ScheduleFilter(bOverrideCooldown)
-	-- Cooldown override = stop any cooldown timer schedule as normal
+	-- Cooldown override = stop any cooldown timer, then schedule as normal
 	if bOverrideCooldown and self.timerCooldown ~= nil then
 		self.timerCooldown:Stop()
 		self.timerCooldown = nil
@@ -332,11 +335,11 @@ function BuffFilter:ScheduleFilter(bOverrideCooldown)
 		Scheduled filter is pending, or cooldown is in effect. 
 		In either case, just indicate the need for an extra filtering pass.
 	--]]
-	if self.timerScheduler ~= nil or self.timerCooldown ~= nil then 
+	if self.timerDelay ~= nil or self.timerCooldown ~= nil then 
 		self.bScheduleExtraFiltering = true
 	else
 		-- No pending scheduled filter, no cooldown. Schedule filtering.
-		self.timerScheduler = ApolloTimer.Create(self.tSettings.nTimerDelay/1000, false, "ExecuteScheduledFilter", BuffFilter)		
+		self.timerDelay = ApolloTimer.Create(self.tSettings.nTimerDelay/1000, false, "ExecuteScheduledFilter", BuffFilter)		
 	end
 end
 
@@ -345,7 +348,7 @@ function BuffFilter:ExecuteScheduledFilter()
 	self:Filter()
 
 	-- Start cooldown timer
-	self.timerScheduler = nil
+	self.timerDelay = nil
 	self.timerCooldown = ApolloTimer.Create(self.tSettings.nTimerCooldown/1000, false, "OnCooldownFinished", BuffFilter)
 end
 
@@ -1009,11 +1012,35 @@ function BuffFilter:OnResetButton(wndHandler, wndControl, eMouseButton)
 	self:UpdateSettingsGUI()
 end
 
---[[ For now, only react to player buff updates. Retrigger update in 0.1s, when buffs have been drawn. --]]
+-- Schedule an update whenever a buff is added to the player, target, focus or tot unit
 function BuffFilter:OnBuffAdded(unit, tBuff)
-	if unit ~= nil and unit:IsThePlayer() then		
-		self:ScheduleFilter()
-	end
+	if unit ~= nil then
+		local playerUnit = GameLib.GetPlayerUnit()
+		if unit == playerUnit then
+			-- Player unit buff update
+			return self:ScheduleFilter()			
+		else			
+			local targetUnit = playerUnit:GetTarget()			
+			if targetUnit ~= nil then
+				if unit == targetUnit then
+					-- Target unit buff update
+					return self:ScheduleFilter()
+				end
+								
+				local totUnit = targetUnit:GetTarget()
+				if totUnit ~= nil and unit == totUnit then
+					-- Target of target unit buff update
+					return self:ScheduleFilter()
+				end
+			end
+						
+			local focusUnit = playerUnit:GetAlternateTarget()
+			if focusUnit ~= nil and unit == focusUnit then
+				-- Focus unit buff update
+				return self:ScheduleFilter()
+			end
+		end
+	end	
 end
 
 BuffFilter:Init()
