@@ -3,7 +3,6 @@ require "Apollo"
 require "Window"
 
 local BuffFilter = {}
-BuffFilter.ADDON_VERSION = {3, 9, 0}
 
 -- Enums for target/bufftype combinations
 local eTargetTypes = {
@@ -37,7 +36,7 @@ function BuffFilter:Init()
 	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
 	
 	-- Configuration for supported bar providers (Addons). Key must match actual Addon name.
-	self.tBarProviders = {
+	self.tSupportedBarProviders = {
 		-- Stock UI
 		["TargetFrame"] = {
 			fDiscoverBar =
@@ -217,6 +216,10 @@ function BuffFilter:Init()
 		ConfigurationTabBtn = "ConfigurationGroup",
 	}
 	
+	-- Shallow copy the supported bar provider list
+	self.tActiveBarProviders = {}
+	for k,v in pairs(self.tSupportedBarProviders) do self.tActiveBarProviders[k] = v end
+	
 	Apollo.RegisterAddon(self, true, "BuffFilter", {"ToolTips", "VikingTooltips"})
 end
 
@@ -250,17 +253,12 @@ function BuffFilter:OnDocLoaded()
 	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
 	if not bStatus then 
 		local errmsg = string.format("Error restoring settings:\n%s", message)
-		--log:error(errmsg)
 		Apollo.AddAddonErrorText(self, errmsg)
 	end
 		
 	-- Update GUI with current values
 	self:UpdateSettingsGUI()
-				
-	-- Fire scanner once and start timer
-	BuffFilter:OnTimer()
-	self.scanTimer = ApolloTimer.Create(self.wndSettings:FindChild("Slider"):GetValue()/1000, true, "OnTimer", self)
-	
+					
 	-- Hook into tooltip generation
 	BuffFilter:HookBuffTooltipGeneration()
 	
@@ -269,18 +267,14 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
 
 	-- Register events so buffs can be re-filtered outside of the timered schedule
-	Apollo.RegisterEventHandler("ChangeWorld", "OnTimer", self) -- on /reloadui and instance-changes	
+	Apollo.RegisterEventHandler("ChangeWorld", "OnChangeWorld", self) -- on /reloadui and instance-changes	
 	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self) -- when entering/exiting combat
 	Apollo.RegisterEventHandler("TargetUnitChanged", "OnTargetUnitChanged", self) -- when changing target
 	
 	-- New Buff update events
-	--[[
 	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
-	Apollo.RegisterEventHandler("BuffUpdated", "OnBuffUpdated", self)
-	Apollo.RegisterEventHandler("BuffRemoved", "OnBuffRemoved", self)
-	--]]
 	
-	--self.wndSettings:Show(true, true)
+	self:StartInitialTimer()
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -327,11 +321,50 @@ function BuffFilter:OnDependencyError()
 	end
 end
 
+function BuffFilter:ScheduleFilter(bOverrideCooldown)
+	-- Cooldown override = stop any cooldown timer schedule as normal
+	if bOverrideCooldown and self.timerCooldown ~= nil then
+		self.timerCooldown:Stop()
+		self.timerCooldown = nil
+	end
+
+	--[[
+		Scheduled filter is pending, or cooldown is in effect. 
+		In either case, just indicate the need for an extra filtering pass.
+	--]]
+	if self.timerScheduler ~= nil or self.timerCooldown ~= nil then 
+		self.bScheduleExtraFiltering = true
+	else
+		-- No pending scheduled filter, no cooldown. Schedule filtering.
+		self.timerScheduler = ApolloTimer.Create(self.tSettings.nTimerDelay/1000, false, "ExecuteScheduledFilter", BuffFilter)		
+	end
+end
+
+function BuffFilter:ExecuteScheduledFilter()
+	-- Perform filter & sort
+	self:Filter()
+
+	-- Start cooldown timer
+	self.timerScheduler = nil
+	self.timerCooldown = ApolloTimer.Create(self.tSettings.nTimerCooldown/1000, false, "OnCooldownFinished", BuffFilter)
+end
+
+function BuffFilter:OnCooldownFinished()
+	self.timerCooldown = nil
+
+	-- If another filtering was queued up, clear the queue-indicator and schedule another
+	if self.bScheduleExtraFiltering == true then
+		self.bScheduleExtraFiltering = false
+		self:ScheduleFilter()
+	end
+end
+
+
 -- Scan all active buffs for hide-this-buff config
-function BuffFilter:OnTimer()
+function BuffFilter:Filter()
 	-- Determine if "only hide in combat" is enabled, and affects this pass
 	-- NB: Even if hiding is disabled, the pass must go on to re-show hidden buffs.
-	if self.bOnlyHideInCombat == true then
+	if BuffFilter.tSettings.bOnlyHideInCombat == true then
 		local pu = GameLib.GetPlayerUnit()
 		if pu ~= nil then
 			self.bDisableHiding = not pu:IsInCombat()
@@ -347,7 +380,7 @@ function BuffFilter:OnTimer()
 		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
 		b.fFilterBar(b.bar, b.eTargetType, b.eBuffType)
 		
-		if self.bEnableSorting == true then
+		if BuffFilter.tSettings.bEnableSorting == true then
 			self:SortStockBar(b.bar)
 		end
 	end
@@ -359,7 +392,7 @@ function BuffFilter:GetBarsToFilter()
 
 	-- For every provider/target/bufftype combination,
 	-- call each provider-specific function to scan for the bar
-	for strProvider, tProviderDetails in pairs(BuffFilter.tBarProviders) do
+	for strProvider, tProviderDetails in pairs(BuffFilter.tActiveBarProviders) do
 		local addonProvider = Apollo.GetAddon(strProvider)
 		if addonProvider ~= nil then 
 			for _,eTargetType in pairs(eTargetTypes) do
@@ -396,8 +429,6 @@ end
 -- This function does not distinguish between buff and debuff-bars, since
 -- they are the same kind of monster, just with different flags.
 function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
-	--log:debug("Filtering stock %s/%s-bar", eTargetType, eBuffType)
-	
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
 		--log:warn("Unable to filter bar, wndBuffBar input is nil")
@@ -429,7 +460,7 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 				local bMarked = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
 				
 				-- Check if inverse-hiding flag is set, if so, flip the bMarked flag
-				if BuffFilter.bInverseFiltering[eBuffType] == true then
+				if BuffFilter.tSettings.bInverseFiltering[eBuffType] == true then
 					bMarked = not bMarked
 				end
 				
@@ -465,17 +496,10 @@ function BuffFilter:SortStockBar(wndBuffBar)
 	)
 end
 
--- When target changes, schedule a near-immediate buff filtering.
+-- When target changes, schedule an extra near-immediate buff filtering. 
 function BuffFilter:OnTargetUnitChanged(unitTarget)
-	--[[
-		Curiosity: the target change itself does not actually update the buff-bar contents.
-		That apparently happens at 0.1s intervals, regardless of target change. So, once
-		a target change is identified (=now), schedule a single buff-filter in 100ms. That
-		should be enough time for the buffs to actually be present on the target bars.
-	]]
-	if unitTarget ~= nil then
-		BuffFilter.targetChangeTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)
-	end
+	-- Schedule a cooldown-ignoring filtering
+	self:ScheduleFilter(true)
 end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
@@ -558,14 +582,13 @@ function BuffFilter:OnSave(eType)
 		return 
 	end
 	
-	-- Add current addon version to settings, for future compatibility/load checks
 	local tSaveData = {}
-	tSaveData.addonVersion = self.ADDON_VERSION
 	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
-	tSaveData.nTimer = self.nTimer
-	tSaveData.bOnlyHideInCombat = self.bOnlyHideInCombat
-	tSaveData.bEnableSorting = self.bEnableSorting
-	tSaveData.bInverseFiltering = self.bInverseFiltering
+	tSaveData.nTimerDelay = self.tSettings.nTimerDelay
+	tSaveData.nTimerCooldown = self.tSettings.nTimerCooldown
+	tSaveData.bOnlyHideInCombat = self.tSettings.bOnlyHideInCombat
+	tSaveData.bEnableSorting = self.tSettings.bEnableSorting
+	tSaveData.bInverseFiltering = self.tSettings.bInverseFiltering
 	
 	return tSaveData	
 end
@@ -583,15 +606,16 @@ end
 
 -- Called prior to loading saved settings. Ensures all fields have meaningful defaults
 function BuffFilter:SetDefaultValues()
-	-- Scanner interval timer (ms)
-	BuffFilter.nTimer = 3000
+	self.tSettings = {}
+	self.tSettings.nTimerDelay = 200
+	self.tSettings.nTimerCooldown = 3000
 	
 	-- Various config options
-	BuffFilter.bOnlyHideInCombat = false	
-	BuffFilter.bEnableSorting = false
+	self.tSettings.bOnlyHideInCombat = false	
+	self.tSettings.bEnableSorting = false
 	
 	-- Inverse filtering table
-	BuffFilter.bInverseFiltering = {
+	self.tSettings.bInverseFiltering = {
 		[eBuffTypes.Buff] = false,
 		[eBuffTypes.Debuff] = false	
 	}	
@@ -599,22 +623,24 @@ end
 
 -- Called after restoring saved data. Updates all GUI elements.
 function BuffFilter:UpdateSettingsGUI()
-	-- Update timer value and label
-	self.wndSettings:FindChild("Slider"):SetValue(BuffFilter.nTimer)
-	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", BuffFilter.nTimer/1000))
+	-- Update timer value and labels
+	self.wndSettings:FindChild("DelaySlider"):SetValue(self.tSettings.nTimerDelay)
+	self.wndSettings:FindChild("DelaySliderLabel"):SetText(string.format("Event filter-delay (%.2fs):", self.tSettings.nTimerDelay/1000))	
+
+	self.wndSettings:FindChild("CooldownSlider"):SetValue(self.tSettings.nTimerCooldown)
+	self.wndSettings:FindChild("CooldownSliderLabel"):SetText(string.format("Filtering cooldown (%.2fs):", self.tSettings.nTimerCooldown/1000))	
 	
-	self.wndSettings:FindChild("InCombatBtn"):SetCheck(BuffFilter.bOnlyHideInCombat)
-	self.wndSettings:FindChild("InverseBuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Buff])
-	self.wndSettings:FindChild("InverseDebuffsBtn"):SetCheck(BuffFilter.bInverseFiltering[eBuffTypes.Debuff])
-	self.wndSettings:FindChild("EnableSortingBtn"):SetCheck(BuffFilter.bEnableSorting)
+	self.wndSettings:FindChild("InCombatBtn"):SetCheck(self.tSettings.bOnlyHideInCombat)
+	self.wndSettings:FindChild("InverseBuffsBtn"):SetCheck(self.tSettings.bInverseFiltering[eBuffTypes.Buff])
+	self.wndSettings:FindChild("InverseDebuffsBtn"):SetCheck(self.tSettings.bInverseFiltering[eBuffTypes.Debuff])
+	self.wndSettings:FindChild("EnableSortingBtn"):SetCheck(self.tSettings.bEnableSorting)
 end
 
 -- Actual use of table stored in OnRestore is postponed until addon is fully loaded, 
 -- so GUI elements can be updated as well.
 function BuffFilter:RestoreSaveData()
-	--log:info("Loading saved configuration")
-
-	-- Assume OnRestore has placed actual save-data in self.tSavedData. Abort restore if no data is found.
+	-- Assume OnRestore has placed actual save-data in BuffFilter.tSavedData. Abort restore if no data is found.
+	-- NB: RestoreSaveData is pcall'ed with no self context, so use BuffFilter global rather than self
 	if BuffFilter.tSavedData == nil or type(BuffFilter.tSavedData) ~= "table" then
 		Print("No saved BuffFilter configuration found. First run?")
 		return
@@ -626,7 +652,6 @@ function BuffFilter:RestoreSaveData()
 			local bStatus, message = pcall(BuffFilter.RestoreSaveDataBuff, id, b)
 			if not bStatus then
 				local errmsg = string.format("Error restoring settings for a buff:\n%s", message)
-				--log:error(errmsg)
 				Apollo.AddAddonErrorText(BuffFilter, errmsg)
 			end
 		end			
@@ -634,26 +659,31 @@ function BuffFilter:RestoreSaveData()
 	
 	--[[ Override default values with savedata, when present ]]	
 	
-	-- Interval timer setting
-	if type(BuffFilter.tSavedData.nTimer) == "number" then
-		BuffFilter.nTimer = BuffFilter.tSavedData.nTimer
+	-- Delay timer setting
+	if type(BuffFilter.tSavedData.nTimerDelay) == "number" then
+		BuffFilter.tSettings.nTimerDelay = BuffFilter.tSavedData.nTimerDelay
+	end
+	
+	-- Cooldown timer setting
+	if type(BuffFilter.tSavedData.nTimerCooldown) == "number" then
+		BuffFilter.tSettings.nTimerCooldown = BuffFilter.tSavedData.nTimerCooldown
 	end
 	
 	-- Only hide in combat flag
 	if type(BuffFilter.tSavedData.bOnlyHideInCombat) == "boolean" then
-		BuffFilter.bOnlyHideInCombat =  BuffFilter.tSavedData.bOnlyHideInCombat
+		BuffFilter.tSettings.bOnlyHideInCombat =  BuffFilter.tSavedData.bOnlyHideInCombat
 	end	
 
 	-- Enable sorting flag
 	if type(BuffFilter.tSavedData.bEnableSorting) == "boolean" then
-		BuffFilter.bEnableSorting = BuffFilter.tSavedData.bEnableSorting
+		BuffFilter.tSettings.bEnableSorting = BuffFilter.tSavedData.bEnableSorting
 	end	
 	
 	-- Inverse buff/debuff filtering
 	if type(BuffFilter.tSavedData.bInverseFiltering) == "table" then
 		for _,eBuffType in pairs(eBuffTypes) do
 			if type(BuffFilter.tSavedData.bInverseFiltering[eBuffType]) == "boolean" then
-				BuffFilter.bInverseFiltering[eBuffType] = BuffFilter.tSavedData.bInverseFiltering[eBuffType]
+				BuffFilter.tSettings.bInverseFiltering[eBuffType] = BuffFilter.tSavedData.bInverseFiltering[eBuffType]
 			end
 		end
 	end	
@@ -795,14 +825,17 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	end
 	
 	-- Force update
-	BuffFilter:OnTimer()
+	BuffFilter:Filter()
 end
 
-function BuffFilter:OnTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
-	self.nTimer = fNewValue
-	self.wndSettings:FindChild("SliderLabel"):SetText(string.format("Scan interval (%.1fs):", self.nTimer/1000))
-	self.scanTimer:Stop()
-	self.scanTimer = ApolloTimer.Create(self.nTimer/1000, true, "OnTimer", self)
+function BuffFilter:OnDelayTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
+	self.tSettings.nTimerDelay = fNewValue
+	self.wndSettings:FindChild("DelaySliderLabel"):SetText(string.format("Event filter-delay (%.2fs):", self.tSettings.nTimerDelay/1000))
+end
+
+function BuffFilter:OnCooldownTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
+	self.tSettings.nTimerCooldown = fNewValue
+	self.wndSettings:FindChild("CooldownSliderLabel"):SetText(string.format("Filtering cooldown (%.2fs):", self.tSettings.nTimerCooldown/1000))
 end
 
 function BuffFilter:SetGridRowStatus(nRow, eTargetType, bHide)
@@ -837,32 +870,70 @@ end
 
 function BuffFilter:InCombatBtnChange(wndHandler, wndControl, eMouseButton)
 	--log:info("In-combat only " .. (wndControl:IsChecked() and "checked" or "unchecked"))
-	self.bOnlyHideInCombat = wndControl:IsChecked()
-	BuffFilter:OnTimer()
+	self.tSettings.bOnlyHideInCombat = wndControl:IsChecked()
+	BuffFilter:Filter()
 end
 
 function BuffFilter:EnableSortingBtnChange(wndHandler, wndControl, eMouseButton)
 	--log:info("Buff sorting " .. (wndControl:IsChecked() and "checked" or "unchecked"))
-	self.bEnableSorting = wndControl:IsChecked()
-	BuffFilter:OnTimer()
+	self.tSettings.bEnableSorting = wndControl:IsChecked()
+	BuffFilter:Filter()
 end
 
 function BuffFilter:InverseBuffsBtnChange(wndHandler, wndControl, eMouseButton)
 	--log:info("Inverse buff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
-	self.bInverseFiltering[eBuffTypes.Buff] = wndControl:IsChecked()
-	BuffFilter:OnTimer()
+	self.tSettings.bInverseFiltering[eBuffTypes.Buff] = wndControl:IsChecked()
+	BuffFilter:Filter()
 end
 
 function BuffFilter:InverseDebuffsBtnChange( wndHandler, wndControl, eMouseButton )
 	--log:info("Inverse debuff filtering " .. (wndControl:IsChecked() and "checked" or "unchecked"))	
-	self.bInverseFiltering[eBuffTypes.Debuff] = wndControl:IsChecked()
-	BuffFilter:OnTimer()
+	self.tSettings.bInverseFiltering[eBuffTypes.Debuff] = wndControl:IsChecked()
+	BuffFilter:Filter()
 end
 
 function BuffFilter:OnUnitEnteredCombat(unit, bCombat)	
-	-- When player enters or exits combat, fire update
-	if unit:GetName() ~= GameLib.GetPlayerUnit():GetName() then return end
-	BuffFilter:OnTimer()
+	-- When player enters or exits combat, schedule regular update
+	if unit:IsThePlayer() then 
+		BuffFilter:ScheduleFilter()
+	end
+end
+
+-- Changing world or /reloadui, trigger an extraordinary pass in 5 secs
+function BuffFilter:OnChangeWorld()
+	-- World change, schedule a few bonus-updates to ensure fresh buff state is updated (hard to tell when UI is fully loaded)
+	self:StartInitialTimer()
+end
+
+-- When first loaded, changed instance or /reloadui, some startup timers are required
+function BuffFilter:StartInitialTimer(nInitialTimerCount, nInitialTimerDelay) 
+	-- Default is 3 second intervals, 10 times = 30 seconds
+	self:ScheduleFilter()
+	self.nInitialTimersLeft = nInitialTimerCount or 10
+	self.timerInitial = ApolloTimer.Create(nInitialTimerDelay or 3, true, "OnInitialTimer", BuffFilter)
+end
+
+function BuffFilter:OnInitialTimer()
+	-- On initial timer pules, just schedule a regular filtering
+	self.nInitialTimersLeft = self.nInitialTimersLeft - 1
+	self:ScheduleFilter()	
+
+	-- On final pulse, clean the list of known/registered addons so we dont keep scanning for stuff that isn't installed
+	if self.nInitialTimersLeft <= 0 then
+		self:CleanAddonList()
+		self.timerInitial:Stop()
+		self.timerInitial = nil
+	end
+end
+
+function BuffFilter:CleanAddonList()
+	-- Scrub list of Active Bar Providers, so that it only contains addons that actually exist
+	self.tActiveBarProviders = {}
+	for strProvider,provider in pairs(self.tSupportedBarProviders) do		
+		if Apollo.GetAddon(strProvider) ~= nil then 
+			self.tActiveBarProviders[strProvider] = provider
+		end
+	end
 end
 
 function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType, x, y )
@@ -891,7 +962,7 @@ function BuffFilter:CheckAddons()
 	-- For each supported addon, check if the Player/Buff bar can be found
 	local tSupportedAddons = {}
 	local bCheckPassed = false
-	for strProvider,provider in pairs(self.tBarProviders) do		
+	for strProvider,provider in pairs(self.tSupportedBarProviders) do		
 		if Apollo.GetAddon(strProvider) == nil then 
 			BuffFilter:CheckAddon_AddLine(tSupportedAddons, strProvider, "Not installed")
 		else		
@@ -941,17 +1012,7 @@ end
 --[[ For now, only react to player buff updates. Retrigger update in 0.1s, when buffs have been drawn. --]]
 function BuffFilter:OnBuffAdded(unit, tBuff)
 	if unit ~= nil and unit:IsThePlayer() then		
-		BuffFilter.buffAddedTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
-	end
-end
-function BuffFilter:OnBuffUpdated(unit, tBuff)
-	if unit ~= nil and unit:IsThePlayer() then
-		BuffFilter.buffUpdatedTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
-	end
-end
-function BuffFilter:OnBuffRemoved(unit, tBuff)	
-	if unit ~= nil and unit:IsThePlayer() then
-		BuffFilter.buffRemovedTimer = ApolloTimer.Create(0.1, false, "OnTimer", BuffFilter)		
+		self:ScheduleFilter()
 	end
 end
 
