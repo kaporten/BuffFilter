@@ -324,7 +324,7 @@ function BuffFilter:OnDependencyError()
 	end
 end
 
-function BuffFilter:ScheduleFilter(bOverrideCooldown)
+function BuffFilter:ScheduleFilter(bOverrideCooldown, nOverrideDelay)
 	-- Cooldown override = stop any cooldown timer, then schedule as normal
 	if bOverrideCooldown and self.timerCooldown ~= nil then
 		self.timerCooldown:Stop()
@@ -340,7 +340,7 @@ function BuffFilter:ScheduleFilter(bOverrideCooldown)
 	else
 		-- No pending scheduled filter, no cooldown. Schedule filtering.
 		-- Use a timer even if nTimerDelay is 0. This allows other event-driven processes to finish up their work (such as actually constructing the buff icon) before it is filtered.
-		self.timerDelay = ApolloTimer.Create(self.tSettings.nTimerDelay/1000, false, "ExecuteScheduledFilter", BuffFilter)		
+		self.timerDelay = ApolloTimer.Create((nOverrideDelay or self.tSettings.nTimerDelay)/1000, false, "ExecuteScheduledFilter", BuffFilter)		
 	end
 end
 
@@ -509,7 +509,7 @@ end
 -- When target changes, schedule an extra near-immediate buff filtering. 
 function BuffFilter:OnTargetUnitChanged(unitTarget)
 	-- Schedule a cooldown-ignoring filtering
-	self:ScheduleFilter(true)
+	self:ScheduleFilter(true, 100)
 end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
