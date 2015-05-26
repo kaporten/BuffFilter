@@ -928,15 +928,21 @@ function BuffFilter:OnInitialTimer()
 	self.nInitialTimersLeft = self.nInitialTimersLeft - 1
 	self:ScheduleFilter()	
 
-	-- On final pulse, clean the list of known/registered addons so we dont keep scanning for stuff that isn't installed
+	-- On final pulse, scrub the list of known/registered addons so we dont keep scanning for stuff that isn't installed
 	if self.nInitialTimersLeft <= 0 then
-		self:CleanAddonList()
-		self.timerInitial:Stop()
-		self.timerInitial = nil
+		self:ScrubAddonList()
+		
+		--[[	In some borked loading scenarios (long loading-screen time), 
+			the timerInitial will have been stopped/nilled, but OnTimerInitial is still fired. 
+			Don't try to stop the timer if it no longer exists. --]]
+		if self.timerInitial ~= nil then
+			self.timerInitial:Stop()
+			self.timerInitial = nil
+		end
 	end
 end
 
-function BuffFilter:CleanAddonList()
+function BuffFilter:ScrubAddonList()
 	-- Scrub list of Active Bar Providers, so that it only contains addons that actually exist
 	self.tActiveBarProviders = {}
 	for strProvider,provider in pairs(self.tSupportedBarProviders) do		
