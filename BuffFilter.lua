@@ -5,6 +5,8 @@
 require "Apollo"
 require "Window"
 
+
+local Major, Minor, Patch = 4, 1, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -230,6 +232,8 @@ function BuffFilter:OnLoad()
 	-- Load up forms
 	self.xmlDoc = XmlDoc.CreateFromFile("BuffFilter.xml")
 	self.xmlDoc:RegisterCallback("OnDocLoaded", self)
+	
+	Event_FireGenericEvent("OneVersion_ReportAddonInfo", "BuffFilter", Major, Minor, Patch)
 end
 
 function BuffFilter:OnDocLoaded()
