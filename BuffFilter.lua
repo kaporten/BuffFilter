@@ -277,6 +277,7 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterEventHandler("ChangeWorld", "OnChangeWorld", self) -- on /reloadui and instance-changes	
 	Apollo.RegisterEventHandler("UnitEnteredCombat", "OnUnitEnteredCombat", self) -- when entering/exiting combat
 	Apollo.RegisterEventHandler("TargetUnitChanged", "OnTargetUnitChanged", self) -- when changing target
+	Apollo.RegisterEventHandler("AlternateTargetUnitChanged", "OnTargetUnitChanged", self) -- when changing focus
 	
 	-- New Buff update events
 	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
@@ -512,8 +513,8 @@ end
 
 -- When target changes, schedule an extra near-immediate buff filtering. 
 function BuffFilter:OnTargetUnitChanged(unitTarget)
-	-- Schedule a cooldown-ignoring filtering
-	self:ScheduleFilter(true, 100)
+	-- Schedule a cooldown-ignoring filtering. Allow a few hundred ms so the target/focus frame is loaded
+	self:ScheduleFilter(true, 300)	
 end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
