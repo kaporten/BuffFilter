@@ -6,7 +6,7 @@ require "Apollo"
 require "Window"
 
 
-local Major, Minor, Patch = 4, 2, 0
+local Major, Minor, Patch = 4, 3, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -36,6 +36,12 @@ function BuffFilter:new(o)
 end
 
 function BuffFilter:Init()
+	-- Only actually load BuffFilter if it is not already loaded
+	-- This is to prevent double-loads caused by "bufffilter" vs "BuffFilter" dir renames
+	if Apollo.GetAddon("BuffFilter") ~= nil then
+		return
+	end
+	
 	-- Tables for criss-cross references of buffs & tooltips. May be initialized & populated during OnRestore.
 	self.tBuffsById = self.tBuffsById or {}
 	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
