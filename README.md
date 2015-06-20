@@ -9,10 +9,10 @@ Released versions are published on [Curse](http://www.curse.com/ws-addons/wildst
 
 Double addon registration issue?
 ----------
-Due to addon folder renames, you may see the addon registered twice on the Addons list in-game. The addon still works fine, you just see two entries instead of one. You can fix the double-entry issue this way:
+Due to addon folder renames, you may see BuffFilter registered twice on the Addons list in-game. The addon still works fine, you just see two entries instead of one. You can fix the double-entry issue this way:
 
 1. Shut down WildStar completely.
-1. Uninstall the addon.
+1. Uninstall BuffFilter.
 1. Start WildStar and log in on any character.
 1. Shut down WildStar again, and re-install the addon.
 
