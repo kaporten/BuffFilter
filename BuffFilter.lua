@@ -329,9 +329,6 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
 	
 	self:StartInitialTimer()
-	
-	-- TODO: Remove before release!
-	self.wndSettings:Show(true)
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -786,14 +783,15 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 	if type(b.strIcon) ~= "string" then error(string.format("Saved buff Id %d is missing icon string", id)) end
 	if type(b.bIsBeneficial) ~= "boolean" then error(string.format("Saved buff Id %d is missing isBeneficial boolean", id)) end
 	if type(b.tHideFlags) ~= "table" and type(b.bHide) ~= "table" then error(string.format("Saved buff Id %d is missing tHideFlags table", id)) end
-	if type(b.tHideFlags[eTargetTypes.Player]) ~= "boolean" then error(string.format("Saved buff Id %d is missing tHideFlags[Player] boolean", id)) end
-	if type(b.tHideFlags[eTargetTypes.Target]) ~= "boolean" then error(string.format("Saved buff Id %d is missing tHideFlags[Target] boolean", id)) end
-	
+
 	-- Backwards compatibility, allow savedata hideflags to be read from the bHide structure (renamed to tHideFlags)
 	b.tHideFlags = b.tHideFlags or b.bHide
-	
+
+	if type(b.tHideFlags[eTargetTypes.Player]) ~= "boolean" then error(string.format("Saved buff Id %d is missing tHideFlags[Player] boolean", id)) end
+	if type(b.tHideFlags[eTargetTypes.Target]) ~= "boolean" then error(string.format("Saved buff Id %d is missing tHideFlags[Target] boolean", id)) end
+		
 	-- Backwards compatibility, allow tooltip to be just 1 string
-	b.tTooltips = b.tTooltips or {b.strTooltip}
+	b.tTooltips = b.tTooltips or {[b.strTooltip] = true}
 	
 	-- Focus is a new property, so it may be missing. Default-set it to the Target-hide value.
 	if type(b.tHideFlags[eTargetTypes.Focus]) ~= "boolean" then 
