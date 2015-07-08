@@ -6,7 +6,7 @@ require "Apollo"
 require "Window"
 
 
-local Major, Minor, Patch = 4, 3, 0
+local Major, Minor, Patch = 5, 0, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -41,12 +41,9 @@ function BuffFilter:Init()
 	if Apollo.GetAddon("BuffFilter") ~= nil then
 		return
 	end
-	
-	-- Tables for criss-cross references of buffs & tooltips. May be initialized & populated during OnRestore.
-	self.tBuffsById = self.tBuffsById or {}
-	self.tBuffStatusByTooltip = self.tBuffStatusByTooltip or {}
-	
+		
 	-- Configuration for supported bar providers (Addons). Key must match actual Addon name.
+	-- You can add support for new unitframe addons here, just add a structure to the list below.
 	self.tSupportedBarProviders = {
 		-- Stock UI
 		["TargetFrame"] = {
@@ -66,7 +63,7 @@ function BuffFilter:Init()
 			},
 		},
 		
-		-- Potato UI 2.8
+		-- Potato UI 2.8+
 		["PotatoBuffs"] = {
 			fDiscoverBar =
 				function(addonProvider, strTargetType, strBuffType)
@@ -85,7 +82,6 @@ function BuffFilter:Init()
 			},
 		},		
 		
-		-- SimpleBuffBar
 		["SimpleBuffBar"] = {
 			fDiscoverBar =
 				function(addonProvider, strTargetType, strBuffType)
@@ -103,7 +99,6 @@ function BuffFilter:Init()
 			},
 		},
 		
-		-- Viking Unit Frames
 		["VikingUnitFrames"] = {
 			fDiscoverBar =
 				function(addonProvider, strTargetType, strBuffType)
@@ -209,7 +204,14 @@ function BuffFilter:Init()
 		},		
 	}
 	
-	-- Mapping tables for the Grids column-to-targettype translation
+	-- Shallow copy of the supported bar provider list above. When addon is running, this is the list
+	-- it is actively using to scan for buffbars. This list will be pruned for inactive addons once
+	-- game is fully loaded.
+	self.tActiveBarProviders = {}
+	for k,v in pairs(self.tSupportedBarProviders) do self.tActiveBarProviders[k] = v end
+	
+	-- Mapping tables for the Grids column-to-targettype translation. 
+	-- Used to avoid hardcoding that a click on the settings column 5 should toggle a Target change etc.
 	self.tTargetToColumn = {
 		[eTargetTypes.Player] = 4,
 		[eTargetTypes.Target] = 5,
@@ -217,7 +219,7 @@ function BuffFilter:Init()
 		[eTargetTypes.TargetOfTarget] = 7,
 	}
 	
-	-- Reverse map tTargetToColumn
+	-- Reverse map tTargetToColumn, for dem easy lookups.
 	self.tColumnToTarget = {}
 	for k,v in pairs(self.tTargetToColumn) do self.tColumnToTarget[v] = k end
 
@@ -225,11 +227,48 @@ function BuffFilter:Init()
 	self.tTabButtonToForm = {
 		BuffsTabBtn = "BuffsGroup",
 		ConfigurationTabBtn = "ConfigurationGroup",
-	}
+	}	
 	
-	-- Shallow copy the supported bar provider list
-	self.tActiveBarProviders = {}
-	for k,v in pairs(self.tSupportedBarProviders) do self.tActiveBarProviders[k] = v end
+	--[[ 
+		Tables containing current buff configuration. Both tables below refer to the same set of 
+		tBuffDetails objects. The tBuffsByTooltip structure is primarily used when a buff tooltip
+		needs to be "translated" into one or more known buffs, so it can be determined if the 
+		buff producing this tooltip should be hidden or not.
+
+		When registering new buffs (or buff tooltip-variants), both tables are maintained.
+		Ie., when adding a tBuffDetails by id to tBuffsById, the same tBuffDetails table is added
+		with tooltip as key to the tBuffsByTooltip structure (see RegisterBuff()).
+	--]]
+		
+	--[[
+		Main buff configuration table, containing: baseSpellId->tBuffDetails
+		Each such tBuffDetails entry can have multiple tooltip strings (% variants etc) in the nested .tTooltips table.
+	--]]
+	self.tBuffsById = self.tBuffsById or {}
+	
+	--[[
+		"Exploded" version of tBuffsById, containing: strTooltip->{tBuffDetails}
+		
+		Multiple different strTooltip keys can refer to the same tBuffDetails table (in case of different 
+		variant tooltips for the same buff). 		
+		
+		Furthermore, different buffs can have identical tooltips. This is handled by having each strTooltip
+		refer to a list of tBuffDetails. Because it is impossible to distinguish which of the identical-tooltip
+		buffs is currently active(*), any configuration change will be applied to ALL BUFFS WITH IDENTICAL TOOLTIP.
+		
+		In other words, /bf config changes applies to all buffs in the tBuffsByTooltip[strTooltip] list.
+		
+		Because of this, the buff at tBuffsByTooltip[strTooltip][1] has same configuration as 
+		tBuffsByTooltip[strTooltip][2] etc. So when doing quick find-buff-config-by-tooltip	lookups it is safe 
+		to just look at element 1, which will always be present.
+		
+		(*): Consider the Comfort housing buffs. Many of these have the exact same tooltip text. In this situation, 
+		the user has multiple active buffs with same tooltip active at once. If the user were to select just one of 
+		these for hiding, there would be no way for me to locate that particular buff on the buff-bar, 
+		since multiple buffs with same tooltip (the only distinguishing feature) are present there. So configuration is
+		done on a "any change applies to ALL buffs with this tooltip" basis.
+	--]]
+	self.tBuffsByTooltip = self.tBuffsByTooltip or {}	
 	
 	Apollo.RegisterAddon(self, true, "BuffFilter", {"ToolTips", "VikingTooltips"})
 end
@@ -266,6 +305,7 @@ function BuffFilter:OnDocLoaded()
 	local bStatus, message = pcall(BuffFilter.RestoreSaveData)
 	if not bStatus then 
 		local errmsg = string.format("Error restoring settings:\n%s", message)
+		Print(errmsg)
 		Apollo.AddAddonErrorText(self, errmsg)
 	end
 		
@@ -289,6 +329,9 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
 	
 	self:StartInitialTimer()
+	
+	-- TODO: Remove before release!
+	self.wndSettings:Show(true)
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -478,7 +521,7 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 			-- Certain buffs will have no tooltip message - just ignore these for now, only handle buffs with tooltip
 			if strBuffTooltip ~= nil and strBuffTooltip:len() > 0 then
 				-- Check if tooltip is marked for hiding
-				local bMarked = BuffFilter.tBuffStatusByTooltip[strBuffTooltip] and BuffFilter.tBuffStatusByTooltip[strBuffTooltip][eTargetType]
+				local bMarked = BuffFilter.tBuffsByTooltip[strBuffTooltip] and BuffFilter.tBuffsByTooltip[strBuffTooltip][1].tHideFlags[eTargetType]
 				
 				-- Check if inverse-hiding flag is set, if so, flip the bMarked flag
 				if BuffFilter.tSettings.bInverseFiltering[eBuffType] == true then
@@ -506,8 +549,8 @@ function BuffFilter:SortStockBar(wndBuffBar)
 				return strTooltipA ~= nil and strTooltipA:len() >= 1
 			end
 			
-			local tStatusA = BuffFilter.tBuffStatusByTooltip[strTooltipA]
-			local tStatusB = BuffFilter.tBuffStatusByTooltip[strTooltipB]
+			local tStatusA = BuffFilter.tBuffsByTooltip[strTooltipA][1]
+			local tStatusB = BuffFilter.tBuffsByTooltip[strTooltipB][1]
 		
 			local nPrioA = tStatusA and tStatusA.nPriority or ePriority.Unset
 			local nPrioB = tStatusB and tStatusB.nPriority or ePriority.Unset
@@ -524,14 +567,23 @@ function BuffFilter:OnTargetUnitChanged(unitTarget)
 end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
-function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, bHide, nPriority)
-	-- Assume the two buff tables are in sync, and just check for presence in the first
-	if BuffFilter.tBuffsById[nBaseSpellId] ~= nil then	
-		-- Buff already known, do nothing
+function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, tHideFlags, nPriority)
+	
+	-- Check if the buff to register is already known
+	local bKnownBuff = BuffFilter.tBuffsById[nBaseSpellId] ~= nil
+	
+	-- ... and if it is an already known tooltip variant tooltip
+	local bKnownTooltip = bKnownBuff and BuffFilter.tBuffsById[nBaseSpellId].tTooltips[strTooltip] ~= nil
+	
+	--Print("RegisterBuff, bKnownBuff = " .. tostring(bKnownBuff) .. ", bKnownTooltip = " .. tostring(bKnownTooltip))	
+	if bKnownBuff and bKnownTooltip then
+		-- Been there, done that - do nothing
 		return
 	end
 	
-	-- Input sanity check
+	-- OK so at this point either buff itself is unkown, or we're looking at a new tooltip variant
+	
+	-- Input sanity checks
 	if type(nBaseSpellId) ~= "number" then
 		--log:debug("Trying to register buff with no spellId. Name: %s, Tooltip: %s", tostring(strName), tostring(strTooltip))
 		return
@@ -552,46 +604,61 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		return
 	end	
 	
-	--log:info("Registering buff: '%s', priority: %s", strName, tostring(nPriority))
+	-- Existing or new buff?
+	local tBuffDetails	
+	if bKnownBuff then 
+		-- Buff known, fetch existing buff details and add tooltip
+		tBuffDetails = BuffFilter.tBuffsById[nBaseSpellId]
+		tBuffDetails.tTooltips[strTooltip] = true
+	else
+		-- New buff, construct new buff details table
+		tBuffDetails = {
+			nBaseSpellId = nBaseSpellId,
+			strName = strName,		
+			tTooltips = {[strTooltip] = true},
+			strIcon = strIcon,		
+			bIsBeneficial = bIsBeneficial,
+			tHideFlags = tHideFlags,
+			nPriority = nPriority or ePriority.Unset
+		}
+
+		-- Add new to primary tBuffsById table
+		BuffFilter.tBuffsById[tBuffDetails.nBaseSpellId] = tBuffDetails		
+	end
 	
-	-- Construct buff details table
-	local tBuffDetails = {
-		nBaseSpellId = nBaseSpellId,
-		strName = strName,		
-		strTooltip = strTooltip,
-		strIcon = strIcon,		
-		bIsBeneficial = bIsBeneficial,
-		bHide = bHide,
-		nPriority = nPriority or ePriority.Unset
-	}
-	
-	-- Add to byId table
-	BuffFilter.tBuffsById[tBuffDetails.nBaseSpellId] = tBuffDetails
+ 	-- Update secondary quick-lookup tooltip summary status for buff (scan all tooltip variants)
+	for tt,_ in pairs(tBuffDetails.tTooltips) do
+		-- For every tooltip, check if this particular buff is already present in the tBuffsByTooltip[tt][{buffs}] list.
+		local bPresent = false
+		BuffFilter.tBuffsByTooltip[tt] = BuffFilter.tBuffsByTooltip[tt] or {}
+		for _,b in pairs(BuffFilter.tBuffsByTooltip[tt]) do
+			if b.nBaseSpellId == tBuffDetails.nBaseSpellId then
+				bPresent = true
+			end
+		end
+		
+		-- If not, add it
+		if bPresent == false then
+			BuffFilter.tBuffsByTooltip[tt][#BuffFilter.tBuffsByTooltip[tt]+1] = tBuffDetails
+		end
+	end
 	
 	-- Add buff to Settings window grid
-	
-	local grid = self.wndSettings:FindChild("Grid")
-	local nRow = grid:AddRow("", "", tBuffDetails)
-	grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
-	grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
-	grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
-	grid:SetCellText(nRow, 3, tBuffDetails.strName)	
-	
-	-- Update tooltip summary status for buff
-	local tTTStatus = BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] or {}
-	for k,v in pairs(bHide) do
-		tTTStatus[k] = tTTStatus[k] or v
-		BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip] = tTTStatus
-	end
-
-	-- Update settings gui grid
-	for k,v in pairs(bHide) do
-		BuffFilter:SetGridRowStatus(nRow, k, v)
-	end
-	
-	-- Also update priority (if not already set)
-	BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip].nPriority = BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip].nPriority or nPriority
-	BuffFilter:SetGridRowPriority(nRow, BuffFilter.tBuffStatusByTooltip[tBuffDetails.strTooltip].nPriority)
+	if not bKnownBuff then
+		local grid = self.wndSettings:FindChild("Grid")
+		local nRow = grid:AddRow("", "", tBuffDetails)
+		grid:SetCellImage(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
+		grid:SetCellSortText(nRow, 1, tBuffDetails.bIsBeneficial and "ClientSprites:QuestJewel_Complete_Green" or "ClientSprites:QuestJewel_Offer_Red")
+		grid:SetCellImage(nRow, 2, tBuffDetails.strIcon)	
+		grid:SetCellText(nRow, 3, tBuffDetails.strName)	
+		
+		-- Update settings gui grid
+		for k,v in pairs(tHideFlags) do
+			BuffFilter:SetGridRowStatus(nRow, k, v)
+		end		
+		
+		BuffFilter:SetGridRowPriority(nRow, nPriority)
+	end		
 end
 
 
@@ -715,37 +782,45 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 	-- Sanity check each individual field
 	if type(b.nBaseSpellId) ~= "number" then error(string.format("Saved buff Id %d is missing nBaseSpellId number", id)) end
 	if type(b.strName) ~= "string" then error(string.format("Saved buff Id %d is missing name string", id)) end
-	if type(b.strTooltip) ~= "string" then error(string.format("Saved buff Id %d is missing tooltip string", id)) end
+	if type(b.tTooltips) ~= "table" and type(b.strTooltip) ~= "string" then error(string.format("Saved buff Id %d is missing tooltip table", id)) end
 	if type(b.strIcon) ~= "string" then error(string.format("Saved buff Id %d is missing icon string", id)) end
 	if type(b.bIsBeneficial) ~= "boolean" then error(string.format("Saved buff Id %d is missing isBeneficial boolean", id)) end
-	if type(b.bHide) ~= "table" then error(string.format("Saved buff Id %d is missing bHide table", id)) end
-	if type(b.bHide[eTargetTypes.Player]) ~= "boolean" then error(string.format("Saved buff Id %d is missing bHide[Player] boolean", id)) end
-	if type(b.bHide[eTargetTypes.Target]) ~= "boolean" then error(string.format("Saved buff Id %d is missing bHide[Target] boolean", id)) end
+	if type(b.tHideFlags) ~= "table" and type(b.bHide) ~= "table" then error(string.format("Saved buff Id %d is missing tHideFlags table", id)) end
+	if type(b.tHideFlags[eTargetTypes.Player]) ~= "boolean" then error(string.format("Saved buff Id %d is missing tHideFlags[Player] boolean", id)) end
+	if type(b.tHideFlags[eTargetTypes.Target]) ~= "boolean" then error(string.format("Saved buff Id %d is missing tHideFlags[Target] boolean", id)) end
+	
+	-- Backwards compatibility, allow savedata hideflags to be read from the bHide structure (renamed to tHideFlags)
+	b.tHideFlags = b.tHideFlags or b.bHide
+	
+	-- Backwards compatibility, allow tooltip to be just 1 string
+	b.tTooltips = b.tTooltips or {b.strTooltip}
 	
 	-- Focus is a new property, so it may be missing. Default-set it to the Target-hide value.
-	if type(b.bHide[eTargetTypes.Focus]) ~= "boolean" then 
-		b.bHide[eTargetTypes.Focus] = b.bHide[eTargetTypes.Target]
+	if type(b.tHideFlags[eTargetTypes.Focus]) ~= "boolean" then 
+		b.tHideFlags[eTargetTypes.Focus] = b.tHideFlags[eTargetTypes.Target]
 	end	
 	-- TargetOfTarget is a new property, so it may be missing. Default-set it to the Target-hide value.
-	if type(b.bHide[eTargetTypes.TargetOfTarget]) ~= "boolean" then 
-		b.bHide[eTargetTypes.TargetOfTarget] = b.bHide[eTargetTypes.Target]
+	if type(b.tHideFlags[eTargetTypes.TargetOfTarget]) ~= "boolean" then 
+		b.tHideFlags[eTargetTypes.TargetOfTarget] = b.tHideFlags[eTargetTypes.Target]
 	end	
 	
-	-- All good, now register buff
-	BuffFilter:RegisterBuff(
-		b.nBaseSpellId,
-		b.strName,		
-		b.strTooltip,
-		b.strIcon,		
-		b.bIsBeneficial,
-		{	
-			[eTargetTypes.Player] = b.bHide[eTargetTypes.Player],
-			[eTargetTypes.Target] = b.bHide[eTargetTypes.Target],
-			[eTargetTypes.Focus] = b.bHide[eTargetTypes.Focus],
-			[eTargetTypes.TargetOfTarget] = b.bHide[eTargetTypes.TargetOfTarget]
-		},
-		b.nPriority or ePriority.Unset -- Sort-priority may be missing, default to Unset
-	)
+	-- All good, now register buff (individually per tooltip-variant)
+	for tooltip,_ in pairs(b.tTooltips) do
+		BuffFilter:RegisterBuff(
+			b.nBaseSpellId,
+			b.strName,		
+			tooltip,
+			b.strIcon,		
+			b.bIsBeneficial,
+			{	
+				[eTargetTypes.Player] = b.tHideFlags[eTargetTypes.Player],
+				[eTargetTypes.Target] = b.tHideFlags[eTargetTypes.Target],
+				[eTargetTypes.Focus] = b.tHideFlags[eTargetTypes.Focus],
+				[eTargetTypes.TargetOfTarget] = b.tHideFlags[eTargetTypes.TargetOfTarget]
+			},
+			b.nPriority or ePriority.Unset -- Sort-priority may be missing, default to Unset
+		)
+	end
 end
 
 
@@ -785,38 +860,26 @@ end
 
 function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	local grid = self.wndSettings:FindChild("Grid")	
+	
+	-- Fetch details for changed buff (data at column 1)
 	local tBuffDetails = grid:GetCellData(nRow, 1)
-	local strTooltip = tBuffDetails.strTooltip
+	
+	--local strTooltip = tBuffDetails.strTooltip
 
 	-- Determine which column was clicked
 	local eTargetType = self.tColumnToTarget[nColumn]
 	if eTargetType ~= nil then -- Individual target-type column clicked
 		-- Toggled hide boolean for this target type
-		local bUpdatedHide = not tBuffDetails.bHide[eTargetType]
-		
-		-- When a buff is checked/unchecked, update *all* buffs with same tooltip, not just the checked one
-		for r = 1, grid:GetRowCount() do -- for every row on the grid
-			-- Get buff for this row
-			local tRowBuffDetails = grid:GetCellData(r, 1)
-				
-			-- Check if this buff has same tooltip
-			if tRowBuffDetails.strTooltip == strTooltip then
-				--log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))
-				tRowBuffDetails.bHide[eTargetType] = bUpdatedHide
-				self:SetGridRowStatus(r, eTargetType, bUpdatedHide)				
-			end
-		end
-		
-		-- Also update the by-tooltip summary table to latest value	
-		BuffFilter.tBuffStatusByTooltip[strTooltip][eTargetType] = bUpdatedHide
+		local bUpdatedHide = not tBuffDetails.tHideFlags[eTargetType]
+		tBuffDetails.tHideFlags[eTargetType] = bUpdatedHide
 	elseif nColumn == 3 then
-		--log:info("Toggling buff '%s' for all target types", tBuffDetails.strName)
-		-- Clicking name inverses all column selections
+		-- Clicking buff name (col 3) inverses all column selections
 		-- Do this the easy way - by simulating user input on each column
 		for t,c in pairs(self.tTargetToColumn) do
 			BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, c)
 		end
 	elseif nColumn == 8 then
+		-- Col 8 is the sort column
 		local nPriority = tBuffDetails.nPriority
 		
 		-- Sort toggle order: Unset -> High -> Low -> Unset
@@ -828,21 +891,37 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 			nPriority = nil
 		end
 		
-		-- When a buff has priority changed, update *all* buffs with same tooltip, not just the checked one
-		for r = 1, grid:GetRowCount() do -- for every row on the grid
-			-- Get buff for this row
-			local tRowBuffDetails = grid:GetCellData(r, 1)
-				
-			-- Check if this buff has same tooltip
-			if tRowBuffDetails.strTooltip == strTooltip then
-				--log:info("Setting priority for buff '%s' to %s", tRowBuffDetails.strName, tostring(nPriority))
-				tRowBuffDetails.nPriority = nPriority				
-				BuffFilter:SetGridRowPriority(r, nPriority)
-			end
+		tBuffDetails.nPriority = nPriority
+	end
+	
+	-- After changes are done to the selected tBuffDetails structure, two things must happen:
+	-- 1) Replicate change to all buffs with (any) identical tooltip
+	-- 2) Update settings gui accordingly
+	
+	for tooltip,_ in pairs(tBuffDetails.tTooltips) do -- For every tooltip on the clicked buff
+		for _,buff in pairs(BuffFilter.tBuffsByTooltip[tooltip]) do -- For every buff with same tooltip
+			-- Copy hide/sort config
+			buff.tHideFlags = tBuffDetails.tHideFlags
+			buff.nPriority = tBuffDetails.nPriority
+			
+			-- Update grid for this buff
+			for r = 1, grid:GetRowCount() do -- for every row on the grid
+				-- Get buff for this row
+				local tRowBuffDetails = grid:GetCellData(r, 1)
+					
+				-- Check if this grid-row is the just-updated buff
+				if tRowBuffDetails.nBaseSpellId == buff.nBaseSpellId then
+					--log:info("Toggling buff '%s' for %s-bar, %s --> %s", tRowBuffDetails.strName, eTargetType, tostring(tRowBuffDetails.bHide[eTargetType]), tostring(bUpdatedHide))					
+					-- Update all hide indicators
+					for eTarget,hideflag in pairs(buff.tHideFlags) do
+						BuffFilter:SetGridRowStatus(r, eTarget, hideflag)				
+					end
+					
+					-- Update sort indicator
+					BuffFilter:SetGridRowPriority(r, buff.nPriority)
+				end
+			end			
 		end
-		
-		-- Also add priority to the "buff status by tooltip" table
-		BuffFilter.tBuffStatusByTooltip[strTooltip].nPriority = nPriority
 	end
 	
 	-- Force update
@@ -975,8 +1054,24 @@ function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType,
 		local wndDesc = wndTooltip:FindChild("BuffDescription")
 		local nMinimumHeight = wndTooltip:GetHeight() -- Original tooltip height
 
+		-- Calculate tooltip text - sort tooltips alphabetically into new list, and concatenate
+		local tSortedTooltips = {}
+		for tt,_ in pairs(tBuffDetails.tTooltips) do
+			table.insert(tSortedTooltips, tt)
+		end
+		table.sort(tSortedTooltips)
+		
+		local strMultiTip = ""
+		if #tSortedTooltips > 1 then
+			for idx,tt in ipairs(tSortedTooltips) do
+				strMultiTip = strMultiTip .. "<P><span TextColor=\"xkcdBoringGreen\">[" .. idx .. "] </span><span TextColor=\"xkcdMuddyYellow\">" .. tt .. "</span></P>"
+			end
+		else
+			strMultiTip = tSortedTooltips[1]
+		end
+		
 		-- Set description and recalc height
-		wndDesc:SetText(tBuffDetails.strTooltip)
+		wndDesc:SetText(strMultiTip)
 		wndDesc:SetHeightToContentHeight()
 		
 		local nHeight = math.max(wndDesc:GetHeight() + 40, nMinimumHeight) -- 40 for fixed name+padding height
@@ -1030,7 +1125,7 @@ end
 
 function BuffFilter:OnResetButton(wndHandler, wndControl, eMouseButton)
 	self.tBuffsById = {}
-	self.tBuffStatusByTooltip = {}
+	self.tBuffsByTooltip = {}
 	self:SetDefaultValues()
 	self.wndSettings:FindChild("Grid"):DeleteAll()
 	self:UpdateSettingsGUI()
