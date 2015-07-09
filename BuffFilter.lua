@@ -6,7 +6,7 @@ require "Apollo"
 require "Window"
 
 
-local Major, Minor, Patch = 5, 0, 0
+local Major, Minor, Patch = 5, 1, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -570,7 +570,14 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	local bKnownBuff = BuffFilter.tBuffsById[nBaseSpellId] ~= nil
 	
 	-- ... and if it is an already known tooltip variant tooltip
-	local bKnownTooltip = bKnownBuff and BuffFilter.tBuffsById[nBaseSpellId].tTooltips[strTooltip] ~= nil
+	local bKnownTooltip = false
+	if bKnownBuff then
+		for idx,tt in ipairs(BuffFilter.tBuffsById[nBaseSpellId].tTooltips) do
+			if tt == strTooltip then
+				bKnownTooltip = true
+			end
+		end
+	end
 	
 	--Print("RegisterBuff, bKnownBuff = " .. tostring(bKnownBuff) .. ", bKnownTooltip = " .. tostring(bKnownTooltip))	
 	if bKnownBuff and bKnownTooltip then
@@ -606,13 +613,20 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	if bKnownBuff then 
 		-- Buff known, fetch existing buff details and add tooltip
 		tBuffDetails = BuffFilter.tBuffsById[nBaseSpellId]
-		tBuffDetails.tTooltips[strTooltip] = true
+		
+		-- Adding new tooltip to known buff, add to the "bottom" of the tooltip chain (highest index)
+		table.insert(tBuffDetails.tTooltips, strTooltip)
+		
+		-- If we have reached the cap for known tooltips, remove the first element
+		while #tBuffDetails.tTooltips > 25 do
+			table.remove(tBuffDetails.tTooltips, 1)
+		end		
 	else
 		-- New buff, construct new buff details table
 		tBuffDetails = {
 			nBaseSpellId = nBaseSpellId,
 			strName = strName,		
-			tTooltips = {[strTooltip] = true},
+			tTooltips = {strTooltip}, 
 			strIcon = strIcon,		
 			bIsBeneficial = bIsBeneficial,
 			tHideFlags = tHideFlags,
@@ -624,7 +638,7 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 	end
 	
  	-- Update secondary quick-lookup tooltip summary status for buff (scan all tooltip variants)
-	for tt,_ in pairs(tBuffDetails.tTooltips) do
+	for _,tt in ipairs(tBuffDetails.tTooltips) do
 		-- For every tooltip, check if this particular buff is already present in the tBuffsByTooltip[tt][{buffs}] list.
 		local bPresent = false
 		BuffFilter.tBuffsByTooltip[tt] = BuffFilter.tBuffsByTooltip[tt] or {}
@@ -791,7 +805,16 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 	if type(b.tHideFlags[eTargetTypes.Target]) ~= "boolean" then error(string.format("Saved buff Id %d is missing tHideFlags[Target] boolean", id)) end
 		
 	-- Backwards compatibility, allow tooltip to be just 1 string
-	b.tTooltips = b.tTooltips or {[b.strTooltip] = true}
+	b.tTooltips = b.tTooltips or {b.strTooltip}
+	
+	-- Backwards compatibility, if tTooltip is a [string, boolean] table (from v5.0), flip it to [idx, string] array
+	if b.tTooltips[1] == nil then
+		local tTmp = {}
+		for strTooltip,_ in pairs(b.tTooltips) do
+			table.insert(tTmp, strTooltip)
+		end
+		b.tTooltips = tTmp
+	end
 	
 	-- Focus is a new property, so it may be missing. Default-set it to the Target-hide value.
 	if type(b.tHideFlags[eTargetTypes.Focus]) ~= "boolean" then 
@@ -803,11 +826,11 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 	end	
 	
 	-- All good, now register buff (individually per tooltip-variant)
-	for tooltip,_ in pairs(b.tTooltips) do
+	for nIdx, strTooltip in ipairs(b.tTooltips) do
 		BuffFilter:RegisterBuff(
 			b.nBaseSpellId,
 			b.strName,		
-			tooltip,
+			strTooltip,
 			b.strIcon,		
 			b.bIsBeneficial,
 			{	
@@ -816,7 +839,8 @@ function BuffFilter.RestoreSaveDataBuff(id, b)
 				[eTargetTypes.Focus] = b.tHideFlags[eTargetTypes.Focus],
 				[eTargetTypes.TargetOfTarget] = b.tHideFlags[eTargetTypes.TargetOfTarget]
 			},
-			b.nPriority or ePriority.Unset -- Sort-priority may be missing, default to Unset
+			b.nPriority or ePriority.Unset, -- Sort-priority may be missing, default to Unset
+			nIdx
 		)
 	end
 end
@@ -896,7 +920,7 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	-- 1) Replicate change to all buffs with (any) identical tooltip
 	-- 2) Update settings gui accordingly
 	
-	for tooltip,_ in pairs(tBuffDetails.tTooltips) do -- For every tooltip on the clicked buff
+	for _,tooltip in ipairs(tBuffDetails.tTooltips) do -- For every tooltip on the clicked buff
 		for _,buff in pairs(BuffFilter.tBuffsByTooltip[tooltip]) do -- For every buff with same tooltip
 			-- Copy hide/sort config
 			buff.tHideFlags = tBuffDetails.tHideFlags
@@ -1051,21 +1075,14 @@ function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType,
 		
 		local wndDesc = wndTooltip:FindChild("BuffDescription")
 		local nMinimumHeight = wndTooltip:GetHeight() -- Original tooltip height
-
-		-- Calculate tooltip text - sort tooltips alphabetically into new list, and concatenate
-		local tSortedTooltips = {}
-		for tt,_ in pairs(tBuffDetails.tTooltips) do
-			table.insert(tSortedTooltips, tt)
-		end
-		table.sort(tSortedTooltips)
 		
 		local strMultiTip = ""
-		if #tSortedTooltips > 1 then
-			for idx,tt in ipairs(tSortedTooltips) do
+		if #tBuffDetails.tTooltips > 1 then
+			for idx,tt in ipairs(tBuffDetails.tTooltips) do
 				strMultiTip = strMultiTip .. "<P><span TextColor=\"xkcdBoringGreen\">[" .. idx .. "] </span><span TextColor=\"xkcdMuddyYellow\">" .. tt .. "</span></P>"
 			end
 		else
-			strMultiTip = tSortedTooltips[1]
+			strMultiTip = tBuffDetails.tTooltips[1]
 		end
 		
 		-- Set description and recalc height
