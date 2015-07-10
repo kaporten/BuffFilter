@@ -318,6 +318,7 @@ function BuffFilter:OnDocLoaded()
 	-- Register slash command to display settings
 	Apollo.RegisterSlashCommand("bf", "OnConfigure", self)
 	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
+	Apollo.RegisterEventHandler("Generic_ToggleBuffFilter", "OnToggleBuffFilter", self)
 
 	-- Register events so buffs can be re-filtered outside of the timered schedule
 	Apollo.RegisterEventHandler("ChangeWorld", "OnChangeWorld", self) -- on /reloadui and instance-changes	
@@ -328,7 +329,14 @@ function BuffFilter:OnDocLoaded()
 	-- New Buff update events
 	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
 	
+	-- Interface list loaded (so addon-button can be added
+	Apollo.RegisterEventHandler("InterfaceMenuListHasLoaded", "OnInterfaceMenuListHasLoaded", self)
+	
 	self:StartInitialTimer()
+end
+
+function BuffFilter:OnInterfaceMenuListHasLoaded()
+	Event_FireGenericEvent("InterfaceMenuList_NewAddOn", "BuffFilter", {"Generic_ToggleBuffFilter", "", "IconSprites:Icon_Windows32_UI_CRB_InterfaceMenu_ReportPlayer"})
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -861,6 +869,14 @@ end
 
 
 --[[ SETTINGS GUI ]]
+
+function BuffFilter:OnToggleBuffFilter()
+	if self.wndSettings:IsShown() then
+		self:OnHideSettings()
+	else
+		self:OnConfigure()
+	end
+end
 
 function BuffFilter:OnConfigure()
 	-- Sort buffs before showing settings, but only if not already sorted (allow preservation of other sorting)
