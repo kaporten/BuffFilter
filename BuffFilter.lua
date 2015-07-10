@@ -6,7 +6,7 @@ require "Apollo"
 require "Window"
 
 
-local Major, Minor, Patch = 5, 1, 0
+local Major, Minor, Patch = 5, 2, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -619,7 +619,21 @@ function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIs
 		
 		-- If we have reached the cap for known tooltips, remove the first element
 		while #tBuffDetails.tTooltips > 25 do
-			table.remove(tBuffDetails.tTooltips, 1)
+			-- Remove oldest tooltip (idx 1) from this buff, store actual tooltip removed in variable
+			local strRemovedTooltip = table.remove(tBuffDetails.tTooltips, 1)
+			
+			-- Clean up the tBuffsByTooltip structure accordingly
+			for idx,tBuff in ipairs(BuffFilter.tBuffsByTooltip[strRemovedTooltip]) do
+				-- Go through all buffs for this tooltip (in most cases, there is only 1), and remove THIS buff from the list
+				if tBuff.nBaseSpellId == tBuffDetails.nBaseSpellId then
+					table.remove(BuffFilter.tBuffsByTooltip[strRemovedTooltip], idx)
+				end
+				
+				-- If list of buffs for this tooltip is now empty, remove the key entirely
+				if #BuffFilter.tBuffsByTooltip[strRemovedTooltip] == 0 then
+					BuffFilter.tBuffsByTooltip[strRemovedTooltip] = nil
+				end
+			end			
 		end		
 	else
 		-- New buff, construct new buff details table
