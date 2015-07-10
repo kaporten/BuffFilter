@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Addon Author="porten" APIVersion="10" Name="BuffFilter" Description="Hides selected buffs/debuffs on your buffbar.">
-    <Script Name="BuffFilter.lua"/>
     <Form Name="BuffFilter.xml"/>
+	<Script Name="BuffFilter.lua"/>    
+	<Script Name="BuffFilter_SupportedAddons.lua"/>
 </Addon>

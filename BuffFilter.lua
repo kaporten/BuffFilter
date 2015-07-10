@@ -5,28 +5,32 @@
 require "Apollo"
 require "Window"
 
-
 local Major, Minor, Patch = 5, 2, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
-local eTargetTypes = {
+BuffFilter.eTargetTypes = {
 	Player = "Player",
 	Target = "Target",
 	Focus = "Focus",
 	TargetOfTarget = "TargetOfTarget"
 }
-local eBuffTypes = {
+BuffFilter.eBuffTypes = {
 	Buff = "Buff",
 	Debuff = "Debuff"
 }
 
 -- Buff sort priorities (just high/low for now)
-local ePriority = {
+BuffFilter.ePriority = {
 	High = 1,
 	Unset = 5,
 	Low = 9
 }
+
+-- Local refs to enums for easy access throughout the main BuffFilter file
+local eTargetTypes = BuffFilter.eTargetTypes
+local eBuffTypes = BuffFilter.eBuffTypes
+local ePriority = BuffFilter.ePriority
 
 function BuffFilter:new(o)
     o = o or {}
@@ -42,174 +46,6 @@ function BuffFilter:Init()
 		return
 	end
 		
-	-- Configuration for supported bar providers (Addons). Key must match actual Addon name.
-	-- You can add support for new unitframe addons here, just add a structure to the list below.
-	self.tSupportedBarProviders = {
-		-- Stock UI
-		["TargetFrame"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "luaUnitFrame",
-				[eTargetTypes.Target] = "luaTargetFrame",
-				[eTargetTypes.Focus] = "luaFocusFrame"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BeneBuffBar",
-				[eBuffTypes.Debuff] = "HarmBuffBar"
-			},
-		},
-		
-		-- Potato UI 2.8+
-		["PotatoBuffs"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType .. strBuffType].wndBuffs:FindChild("Buffs")
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "luaPlayer",
-				[eTargetTypes.Target] = "luaTarget",
-				[eTargetTypes.Focus] = "luaFocus",
-				[eTargetTypes.TargetOfTarget] = "luaToT"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "Buffs",
-				[eBuffTypes.Debuff] = "Debuffs"
-			},
-		},		
-		
-		["SimpleBuffBar"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider.bars[strTargetType .. strBuffType]
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "Player",
-				[eTargetTypes.Target] = "Target",
-				[eTargetTypes.Focus] = "Focus"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BuffBar",
-				[eBuffTypes.Debuff] = "DebuffBar"
-			},
-		},
-		
-		["VikingUnitFrames"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType].wndUnitFrame:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "tPlayerFrame",
-				[eTargetTypes.Target] = "tTargetFrame",
-				[eTargetTypes.Focus] = "tFocusFrame",
-				[eTargetTypes.TargetOfTarget] = "tToTFrame"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "Good",
-				[eBuffTypes.Debuff] = "Bad"
-			},		
-		},
-		
-		["FastTargetFrame"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "luaUnitFrame",
-				[eTargetTypes.Target] = "luaTargetFrame",
-				[eTargetTypes.Focus] = "luaFocusFrame"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BeneBuffBar",
-				[eBuffTypes.Debuff] = "HarmBuffBar"
-			},
-		},
-
-		["KuronaFrames"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType]:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "playerFrame",
-				[eTargetTypes.Target] = "targetFrame",
-				[eTargetTypes.Focus] = "focusFrame"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BeneBuffBar",
-				[eBuffTypes.Debuff] = "HarmBuffBar"
-			},
-		},
-		
-		["AlterFrame"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType]:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "wndMain",
-				[eTargetTypes.Target] = "wndTarget",
-				[eTargetTypes.Focus] = "wndFocus"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BeneBuffBar",
-				[eBuffTypes.Debuff] = "HarmBuffBar"
-			},
-		},
-		
-		["CandyUI_UnitFrames"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType]:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "wndPlayerUF",
-				[eTargetTypes.Target] = "wndTargetUF",
-				[eTargetTypes.Focus] = "wndFocusUF",
-				[eTargetTypes.TargetOfTarget] = "wndToTUF"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BuffContainerWindow",
-				[eBuffTypes.Debuff] = "DebuffContainerWindow"
-			},
-		},
-		
-		["ForgeUI_UnitFrames"] = {
-			fDiscoverBar =
-				function(addonProvider, strTargetType, strBuffType)
-					return addonProvider[strTargetType .. strBuffType]
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
-			tTargetType = {
-				[eTargetTypes.Player] = "wndPlayer",
-				[eTargetTypes.Target] = "wndTarget",
-				[eTargetTypes.Focus] = "wndFocus"
-			},
-			tBuffType = {
-				[eBuffTypes.Buff] = "BuffFrame",
-				[eBuffTypes.Debuff] = "DebuffFrame"
-			},
-		},		
-	}
-	
-	-- Shallow copy of the supported bar provider list above. When addon is running, this is the list
-	-- it is actively using to scan for buffbars. This list will be pruned for inactive addons once
-	-- game is fully loaded.
-	self.tActiveBarProviders = {}
-	for k,v in pairs(self.tSupportedBarProviders) do self.tActiveBarProviders[k] = v end
-	
 	-- Mapping tables for the Grids column-to-targettype translation. 
 	-- Used to avoid hardcoding that a click on the settings column 5 should toggle a Target change etc.
 	self.tTargetToColumn = {
@@ -282,6 +118,15 @@ function BuffFilter:OnLoad()
 end
 
 function BuffFilter:OnDocLoaded()
+	-- Configuration for supported bar providers (Addons)
+	self.tSupportedBarProviders = self:GetSupportedAddons()
+	
+	-- Shallow copy of the supported bar provider list above. When addon is running, this is the list
+	-- it is actively using to scan for buffbars. This list will be pruned for inactive addons once
+	-- game is fully loaded.
+	self.tActiveBarProviders = {}
+	for k,v in pairs(self.tSupportedBarProviders) do self.tActiveBarProviders[k] = v end
+
 	-- Load settings form
 	if self.xmlDoc ~= nil and self.xmlDoc:IsLoaded() then
 		self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
