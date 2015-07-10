@@ -9,6 +9,14 @@ local BuffFilter = Apollo.GetAddon("BuffFilter")
 	Adding additional (unused) addons here does not impact BuffFilter performance:
 	Once the game is fully loaded, any addon which is not currently installed will
 	be removed from the list of addons to actively filter.
+	
+	The fDiscoverBar function must be implemented so that it returns a reference to your addons
+	BeneBuffBar and HarmBuffBar for each possible combination of tTargetType/tBuffType
+	(strTargetType/strBuffType input to fDiscoverBar).
+	
+	The fFilterBar function is responsible for actually filtering buffs on the buff/debuff bar
+	identified by fDiscoverBar. If you use the stock "BuffContainerWindow" controls, just use
+	fFilterBar = BuffFilter.FilterStockBar.
 --]]
 function BuffFilter:GetSupportedAddons()
 	local eTargetTypes = BuffFilter.eTargetTypes
