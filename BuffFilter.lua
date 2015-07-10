@@ -371,7 +371,8 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 			-- Certain buffs will have no tooltip message - just ignore these for now, only handle buffs with tooltip
 			if strBuffTooltip ~= nil and strBuffTooltip:len() > 0 then
 				-- Check if tooltip is marked for hiding
-				local bMarked = BuffFilter.tBuffsByTooltip[strBuffTooltip] and BuffFilter.tBuffsByTooltip[strBuffTooltip][1].tHideFlags[eTargetType]
+				local tConfig = BuffFilter.tBuffsByTooltip[strBuffTooltip]
+				local bMarked = tConfig and tConfig[1].tHideFlags[eTargetType]
 				
 				-- Check if inverse-hiding flag is set, if so, flip the bMarked flag
 				if BuffFilter.tSettings.bInverseFiltering[eBuffType] == true then
