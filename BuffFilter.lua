@@ -5,7 +5,7 @@
 require "Apollo"
 require "Window"
 
-local Major, Minor, Patch = 5, 2, 0
+local Major, Minor, Patch = 5, 2, 1
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -400,9 +400,9 @@ function BuffFilter:SortStockBar(wndBuffBar)
 			if strTooltipA == nil or strTooltipA:len() <= 1 or strTooltipB == nil or strTooltipB:len() <= 1 then
 				return strTooltipA ~= nil and strTooltipA:len() >= 1
 			end
-			
-			local tStatusA = BuffFilter.tBuffsByTooltip[strTooltipA][1]
-			local tStatusB = BuffFilter.tBuffsByTooltip[strTooltipB][1]
+
+			local tStatusA = BuffFilter.tBuffsByTooltip[strTooltipA] and BuffFilter.tBuffsByTooltip[strTooltipA][1]
+			local tStatusB = BuffFilter.tBuffsByTooltip[strTooltipB] and BuffFilter.tBuffsByTooltip[strTooltipB][1]
 		
 			local nPrioA = tStatusA and tStatusA.nPriority or ePriority.Unset
 			local nPrioB = tStatusB and tStatusB.nPriority or ePriority.Unset
