@@ -118,14 +118,14 @@ function BuffFilter:OnLoad()
 end
 
 function BuffFilter:OnDocLoaded()
-	-- Configuration for supported bar providers (Addons)
-	self.tSupportedBarProviders = self:GetSupportedAddons()
+	-- Configuration for supported addons
+	self.tSupportedAddons = self:GetSupportedAddons()
 	
-	-- Shallow copy of the supported bar provider list above. When addon is running, this is the list
+	-- Shallow copy of the supported addon list above. When addon is running, this is the list
 	-- it is actively using to scan for buffbars. This list will be pruned for inactive addons once
 	-- game is fully loaded.
-	self.tActiveBarProviders = {}
-	for k,v in pairs(self.tSupportedBarProviders) do self.tActiveBarProviders[k] = v end
+	self.tActiveAddons = {}
+	for k,v in pairs(self.tSupportedAddons) do self.tActiveAddons[k] = v end
 
 	-- Load settings form
 	if self.xmlDoc ~= nil and self.xmlDoc:IsLoaded() then
@@ -287,46 +287,47 @@ function BuffFilter:Filter()
 		self.bDisableHiding = false
 	end
 	
-	local tBarsToFilter = self:GetBarsToFilter()
+	-- Get list of all bars to filter, across all currently active addons
+	local tBarsToFilter = self:GetBarsToFilter()	
 	
-	for _,b in ipairs(tBarsToFilter) do		
-		-- Call provider-specific filter function.
-		-- TODO: Safe call / error reporting? Nah, skipping in favor of performance for now.
-		b.fFilterBar(b.bar, b.eTargetType, b.eBuffType)
+	-- For each found bar, call the filter/sort functions for this addon-type
+	for _,tBar in ipairs(tBarsToFilter) do		
+		tBar.tAddonDetails.fFilterBar(tBar.bar, tBar.eTargetType,tBar.eBuffType)
 		
 		if BuffFilter.tSettings.bEnableSorting == true then
-			self:SortStockBar(b.bar)
+			self:SortStockBar(tBar.bar)
 		end
 	end
 end
 
--- Based on config for bars / providers, attempt to locate all buffbars on the GUIs.
+-- Scan all active addons for buff-bars to filter
 function BuffFilter:GetBarsToFilter()
 	local result = {}
 
-	-- For every provider/target/bufftype combination,
-	-- call each provider-specific function to scan for the bar
-	for strProvider, tProviderDetails in pairs(BuffFilter.tActiveBarProviders) do
-		local addonProvider = Apollo.GetAddon(strProvider)
-		if addonProvider ~= nil then 
+	-- Search for every (active) addon/bar/bufftype combination
+	for strAddonName,tAddonDetails in pairs(BuffFilter.tActiveAddons) do
+		local addon = Apollo.GetAddon(strAddonName)
+		if addon ~= nil then 
 			for _,eTargetType in pairs(eTargetTypes) do
-				local strBarTypeParam = tProviderDetails.tTargetType[eTargetType]
+				local strBarTypeParam = tAddonDetails.tTargetType[eTargetType]
 				if strBarTypeParam ~= nil then
 					for _,eBuffType in pairs(eBuffTypes) do		
-						local strBuffTypeParam = tProviderDetails.tBuffType[eBuffType]
+						local strBuffTypeParam = tAddonDetails.tBuffType[eBuffType]
 						if strBuffTypeParam ~= nil then																	
-							-- Safe call provider-specific discovery function
-							local bStatus, foundBar = pcall(tProviderDetails.fDiscoverBar, addonProvider, strBarTypeParam, strBuffTypeParam)					
+							-- Safe call addon-specific discovery function
+							local bStatus, foundBar = pcall(tAddonDetails.fDiscoverBar, addon, strBarTypeParam, strBuffTypeParam)					
 							if bStatus == true and foundBar ~= nil then
-								-- Bar was found. Construct table with ref to bar, and provider-specific filter function.
+								-- Bar was found. Construct table with ref to bar, and addon-specific filter function.
 								local tFoundBar = {									
+									addon = addon,								-- Addon which provides the bar to filter
+									tAddonDetails = tAddonDetails,				-- Configuration for this addon
+									bar = foundBar,								-- Reference to actual found bar instance
 									eTargetType = eTargetType,					-- Target-type (Player, Target, Focus etc)
 									eBuffType = eBuffType,						-- Buff type (Buffs or Debuffs)
-									fFilterBar = tProviderDetails.fFilterBar,	-- Provider-specific filter function
-									addonProvider = addonProvider,				-- Addon which provides the bar to filter
-									bar = foundBar,								-- Reference to actual bar instance
 								}
-								-- Add found bar to result. Check remaining combos, more providers may be active at the same time, for the same bar
+								-- Add found bar to result. 
+								-- Check remaining combos, more addons may be active at the same time for the 
+								-- same bar type (eg. using SimpleBuffBar in addition to your "main" buffbars)
 								result[#result+1] = tFoundBar
 							end
 						end
@@ -931,16 +932,16 @@ function BuffFilter:OnInitialTimer()
 end
 
 function BuffFilter:ScrubAddonList()
-	-- Scrub list of Active Bar Providers, so that it only contains addons that actually exist
-	self.tActiveBarProviders = {}
-	for strProvider,provider in pairs(self.tSupportedBarProviders) do		
-		if Apollo.GetAddon(strProvider) ~= nil then 
-			self.tActiveBarProviders[strProvider] = provider
+	-- Scrub list of active addons, so that it only contains installed/loaded addons
+	self.tActiveAddons = {}
+	for strAddonName,tAddonDetails in pairs(self.tSupportedAddons) do		
+		if Apollo.GetAddon(strAddonName) ~= nil then 
+			self.tActiveAddons[strAddonName] = tAddonDetails
 		end
 	end
 end
 
-function BuffFilter:OnGenerateGridTooltip( wndHandler, wndControl, eToolTipType, x, y )
+function BuffFilter:OnGenerateGridTooltip(wndHandler, wndControl, eToolTipType, x, y)
 	local grid = self.wndSettings:FindChild("Grid")
 
 	local tBuffDetails = grid:GetCellData(x+1,1)
@@ -975,22 +976,22 @@ function BuffFilter:CheckAddons()
 	-- For each supported addon, check if the Player/Buff bar can be found
 	local tSupportedAddons = {}
 	local bCheckPassed = false
-	for strProvider,provider in pairs(self.tSupportedBarProviders) do		
-		if Apollo.GetAddon(strProvider) == nil then 
-			BuffFilter:CheckAddon_AddLine(tSupportedAddons, strProvider, "Not installed")
+	for strAddonName,tAddonDetails in pairs(self.tSupportedAddons) do		
+		if Apollo.GetAddon(strAddonName) == nil then 
+			BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddonName, "Not installed")
 		else		
 			-- Supported addon installed, check Player Buff bar can be found
 			local bStatus, discoveryResult = pcall(
-				provider.fDiscoverBar,
-				Apollo.GetAddon(strProvider),
-				provider.tTargetType[eTargetTypes.Player],
-				provider.tBuffType[eBuffTypes.Buff])
+				tAddonDetails.fDiscoverBar,
+				Apollo.GetAddon(strAddonName),
+				tAddonDetails.tTargetType[eTargetTypes.Player],
+				tAddonDetails.tBuffType[eBuffTypes.Buff])
 
 			if bStatus == true and discoveryResult ~= nil then
-				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strProvider, "OK") -- kinda pointless, wont be shown anyway
+				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddonName, "OK") -- kinda pointless, wont be shown anyway
 				bCheckPassed = true
 			else
-				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strProvider, "Unsupported version")
+				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddonName, "Unsupported version")
 			end
 		end
 	end
