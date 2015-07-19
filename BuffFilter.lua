@@ -5,7 +5,7 @@
 require "Apollo"
 require "Window"
 
-local Major, Minor, Patch = 5, 2, 1
+local Major, Minor, Patch = 6, 0, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -104,9 +104,13 @@ function BuffFilter:Init()
 		since multiple buffs with same tooltip (the only distinguishing feature) are present there. So configuration is
 		done on a "any change applies to ALL buffs with this tooltip" basis.
 	--]]
-	self.tBuffsByTooltip = self.tBuffsByTooltip or {}	
+	self.tBuffsByTooltip = self.tBuffsByTooltip or {}
 	
-	Apollo.RegisterAddon(self, true, "BuffFilter", {"ToolTips", "VikingTooltips"})
+	-- Empty tables for supported addon configs
+	self.tSupportedAddons = {}
+	self.tActiveAddons = {}
+	
+	Apollo.RegisterAddon(self, true, "BuffFilter", {"ToolTips", "VikingTooltips", "InterfaceMenuList"})
 end
 
 function BuffFilter:OnLoad()	
@@ -119,14 +123,8 @@ end
 
 function BuffFilter:OnDocLoaded()
 	-- Configuration for supported addons
-	self.tSupportedAddons = self:GetSupportedAddons()
+	self:RegisterSupportedAddons()
 	
-	-- Shallow copy of the supported addon list above. When addon is running, this is the list
-	-- it is actively using to scan for buffbars. This list will be pruned for inactive addons once
-	-- game is fully loaded.
-	self.tActiveAddons = {}
-	for k,v in pairs(self.tSupportedAddons) do self.tActiveAddons[k] = v end
-
 	-- Load settings form
 	if self.xmlDoc ~= nil and self.xmlDoc:IsLoaded() then
 		self.wndSettings = Apollo.LoadForm(self.xmlDoc, "SettingsForm", nil, self)
@@ -180,8 +178,22 @@ function BuffFilter:OnDocLoaded()
 	self:StartInitialTimer()
 end
 
+-- When interface has loaded, fire the "add BuffFilter button" event
 function BuffFilter:OnInterfaceMenuListHasLoaded()
 	Event_FireGenericEvent("InterfaceMenuList_NewAddOn", "BuffFilter", {"Generic_ToggleBuffFilter", "", "IconSprites:Icon_Windows32_UI_CRB_InterfaceMenu_ReportPlayer"})
+end
+
+-- Adds the specified addon to supported/active addons list
+-- Any existing configuration will be overwritten. 
+-- nil input means the addon is no longer supported (removed from BF)
+function BuffFilter:RegisterSupportedAddon(strAddon, tAddonDetails)
+	-- Supply default values for filter/sort functions (stock bars)
+	tAddonDetails.fFilterBar = tAddonDetails.fFilterBar or BuffFilter.FilterStockBar
+	tAddonDetails.fSortBar = tAddonDetails.fSortBar or BuffFilter.SortStockBar
+
+	BuffFilter.tSupportedAddons[strAddon] = tAddonDetails
+	BuffFilter.tActiveAddons[strAddon] = tAddonDetails
+	BuffFilter.StartInitialTimer()
 end
 
 -- Hack to combine spellId/details with the tooltip, since only half of each 
@@ -230,21 +242,21 @@ end
 
 function BuffFilter:ScheduleFilter(bOverrideCooldown, nOverrideDelay)
 	-- Cooldown override = stop any cooldown timer, then schedule as normal
-	if bOverrideCooldown and self.timerCooldown ~= nil then
-		self.timerCooldown:Stop()
-		self.timerCooldown = nil
+	if bOverrideCooldown and BuffFilter.timerCooldown ~= nil then
+		BuffFilter.timerCooldown:Stop()
+		BuffFilter.timerCooldown = nil
 	end
 
 	--[[
 		Scheduled filter is pending, or cooldown is in effect. 
 		In either case, just indicate the need for an extra filtering pass.
 	--]]
-	if self.timerDelay ~= nil or self.timerCooldown ~= nil then 
-		self.bScheduleExtraFiltering = true
+	if BuffFilter.timerDelay ~= nil or BuffFilter.timerCooldown ~= nil then 
+		BuffFilter.bScheduleExtraFiltering = true
 	else
 		-- No pending scheduled filter, no cooldown. Schedule filtering.
 		-- Use a timer even if nTimerDelay is 0. This allows other event-driven processes to finish up their work (such as actually constructing the buff icon) before it is filtered.
-		self.timerDelay = ApolloTimer.Create((nOverrideDelay or self.tSettings.nTimerDelay)/1000, false, "ExecuteScheduledFilter", BuffFilter)		
+		BuffFilter.timerDelay = ApolloTimer.Create((nOverrideDelay or BuffFilter.tSettings.nTimerDelay)/1000, false, "ExecuteScheduledFilter", BuffFilter)		
 	end
 end
 
@@ -292,10 +304,10 @@ function BuffFilter:Filter()
 	
 	-- For each found bar, call the filter/sort functions for this addon-type
 	for _,tBar in ipairs(tBarsToFilter) do		
-		tBar.tAddonDetails.fFilterBar(tBar.bar, tBar.eTargetType,tBar.eBuffType)
+		tBar.tAddonDetails.fFilterBar(tBar.bar, tBar.eTargetType, tBar.eBuffType, tBar.strAddonName, tBar.tAddonDetails)
 		
 		if BuffFilter.tSettings.bEnableSorting == true then
-			self:SortStockBar(tBar.bar)
+			tBar.tAddonDetails.fSortBar(tBar.bar, tBar.eTargetType, tBar.eBuffType, tBar.strAddonName, tBar.tAddonDetails)
 		end
 	end
 end
@@ -319,11 +331,11 @@ function BuffFilter:GetBarsToFilter()
 							if bStatus == true and foundBar ~= nil then
 								-- Bar was found. Construct table with ref to bar, and addon-specific filter function.
 								local tFoundBar = {									
-									addon = addon,								-- Addon which provides the bar to filter
-									tAddonDetails = tAddonDetails,				-- Configuration for this addon
-									bar = foundBar,								-- Reference to actual found bar instance
+									strAddonName = strAddonName,				-- Name of addon providing this bar
+									tAddonDetails = tAddonDetails,				-- Full configuration for the addon
 									eTargetType = eTargetType,					-- Target-type (Player, Target, Focus etc)
 									eBuffType = eBuffType,						-- Buff type (Buffs or Debuffs)
+									bar = foundBar,								-- Reference to actual found bar instance
 								}
 								-- Add found bar to result. 
 								-- Check remaining combos, more addons may be active at the same time for the 
@@ -343,7 +355,7 @@ end
 -- Function for filtering buffs from any stock buff-bar. 
 -- This function does not distinguish between buff and debuff-bars, since
 -- they are the same kind of monster, just with different flags.
-function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
+function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType, strAddonName, tAddonDetails)
 	-- Get buff child windows on bar	
 	if wndBuffBar == nil then
 		--log:warn("Unable to filter bar, wndBuffBar input is nil")
@@ -390,7 +402,8 @@ function BuffFilter.FilterStockBar(wndBuffBar, eTargetType, eBuffType)
 	end
 end
 
-function BuffFilter:SortStockBar(wndBuffBar)
+-- Only wndBuffBar reference used in stock sort
+function BuffFilter.SortStockBar(wndBuffBar, eTargetType, eBuffType, strAddonName, tAddonDetails)
 	wndBuffBar:ArrangeChildrenHorz(0, 
 		function(a, b) 
 			local strTooltipA = a:GetBuffTooltip()
@@ -904,30 +917,45 @@ function BuffFilter:OnChangeWorld()
 	self:StartInitialTimer()
 end
 
--- When first loaded, changed instance or /reloadui, some startup timers are required
-function BuffFilter:StartInitialTimer(nInitialTimerCount, nInitialTimerDelay) 
-	-- Default is 3 second intervals, 10 times = 30 seconds
-	self:ScheduleFilter()
-	self.nInitialTimersLeft = nInitialTimerCount or 10
-	self.timerInitial = ApolloTimer.Create(nInitialTimerDelay or 3, true, "OnInitialTimer", BuffFilter)
+-- When BF surrounding environment changes, fire up some timers at escalating intervals (initially fast, then slower)
+-- This is used to handle initial filters after unknown load-times, world changes, etc.
+-- It is also used to scrub the addon-list for non-installed addons after a while, to increase performance.
+function BuffFilter:StartInitialTimer()
+	-- Don't reset timer if we *just* started it, just let it continue it's course
+	if type(BuffFilter.nInitialTimersDelay) == "number" and BuffFilter.nInitialTimersDelay <= 1 then
+		return
+	end
+	
+	-- Fire first event immediately, OnInitialTimer will increase delay and re-fire
+	BuffFilter.nInitialTimersDelay = 0
+	BuffFilter.timerInitial = ApolloTimer.Create(BuffFilter.nInitialTimersDelay, false, "OnInitialTimer", BuffFilter)
 end
 
 function BuffFilter:OnInitialTimer()
-	-- On initial timer pules, just schedule a regular filtering
-	self.nInitialTimersLeft = self.nInitialTimersLeft - 1
-	self:ScheduleFilter()	
+	-- Fire the event to signal 3rd party addon integration
+	Event_FireGenericEvent("BuffFilter_RegisterSupportedAddons")
 
-	-- On final pulse, scrub the list of known/registered addons so we dont keep scanning for stuff that isn't installed
-	if self.nInitialTimersLeft <= 0 then
-		self:ScrubAddonList()
+	-- Schedule a filtering
+	BuffFilter:ScheduleFilter()	
+	
+	-- After 7 pulses (~28 seconds), scrub the list of known/registered addons 
+	-- so we dont keep scanning for stuff that isn't installed
+	if BuffFilter.nInitialTimersDelay > 7 then
+		BuffFilter:ScrubAddonList()
 		
-		--[[	In some borked loading scenarios (long loading-screen time), 
+		--[[	
+			In some borked loading scenarios (long loading-screen time), 
 			the timerInitial will have been stopped/nilled, but OnTimerInitial is still fired. 
-			Don't try to stop the timer if it no longer exists. --]]
-		if self.timerInitial ~= nil then
-			self.timerInitial:Stop()
-			self.timerInitial = nil
+			Fix: don't try to stop the timer if it no longer exists. 
+		--]]
+		if BuffFilter.timerInitial ~= nil then
+			BuffFilter.timerInitial:Stop()
+			BuffFilter.timerInitial = nil
 		end
+	else
+		-- Fire off another timer, this time with 1 sec longer delay
+		BuffFilter.nInitialTimersDelay = BuffFilter.nInitialTimersDelay + 1	
+		BuffFilter.timerInitial = ApolloTimer.Create(BuffFilter.nInitialTimersDelay, false, "OnInitialTimer", BuffFilter)		
 	end
 end
 
@@ -974,11 +1002,11 @@ end
 -- Checks if any supported addon is found, displays warning message overlay in settings if not
 function BuffFilter:CheckAddons()
 	-- For each supported addon, check if the Player/Buff bar can be found
-	local tSupportedAddons = {}
+	local tFoundAddons = {}
 	local bCheckPassed = false
 	for strAddonName,tAddonDetails in pairs(self.tSupportedAddons) do		
 		if Apollo.GetAddon(strAddonName) == nil then 
-			BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddonName, "Not installed")
+			BuffFilter:CheckAddon_AddLine(tFoundAddons, strAddonName, "Not installed")
 		else		
 			-- Supported addon installed, check Player Buff bar can be found
 			local bStatus, discoveryResult = pcall(
@@ -988,16 +1016,16 @@ function BuffFilter:CheckAddons()
 				tAddonDetails.tBuffType[eBuffTypes.Buff])
 
 			if bStatus == true and discoveryResult ~= nil then
-				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddonName, "OK") -- kinda pointless, wont be shown anyway
+				BuffFilter:CheckAddon_AddLine(tFoundAddons, strAddonName, "OK") -- kinda pointless, wont be shown anyway
 				bCheckPassed = true
 			else
-				BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddonName, "Unsupported version")
+				BuffFilter:CheckAddon_AddLine(tFoundAddons, strAddonName, "Unsupported version")
 			end
 		end
 	end
 	
 	-- Convert list of supported addon (with status) to return-delimited list	
-	local strSupportedAddons = table.concat(tSupportedAddons, "\n")
+	local strSupportedAddons = table.concat(tFoundAddons, "\n")
 		
 	-- Show warning message
 	self.wndSettings:FindChild("GeneralDescription"):SetText("BuffFilter only works with the stock Unit Frames, or a specific list of replacement / additional Unit Frame addons.\n\nWithout one of the following addons installed, BuffFilter will simply not hide any buffs.")
@@ -1005,9 +1033,9 @@ function BuffFilter:CheckAddons()
 	self.wndSettings:FindChild("WarningFrame"):Show(not bCheckPassed, false)
 end
 
-function BuffFilter:CheckAddon_AddLine(tSupportedAddons, strAddon, strStatus)
+function BuffFilter:CheckAddon_AddLine(tFoundAddons, strAddon, strStatus)
 	local textColor = strStatus == "OK" and "xkcdBoringGreen" or "AddonError"
-	tSupportedAddons[#tSupportedAddons+1] = string.format("<P TextColor=\"%s\" Font=\"CRB_InterfaceLarge\" Align=\"Center\">%s (%s)</P>",
+	tFoundAddons[#tFoundAddons+1] = string.format("<P TextColor=\"%s\" Font=\"CRB_InterfaceLarge\" Align=\"Center\">%s (%s)</P>",
 		textColor, strAddon, strStatus)	
 end
 

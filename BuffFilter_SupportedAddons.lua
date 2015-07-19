@@ -1,10 +1,10 @@
 local BuffFilter = Apollo.GetAddon("BuffFilter")
 
 --[[
-	Configuration file for supported addons. 
+	Configuration file for built-in supported addons. 
 	
-	You can add support for new unitframe addons here, just add a structure to the list below.
-	Table key must match actual addon name.
+	You can add support for new unitframe addons here, just add a structure to the 
+	list produced by GetSupportedAddons(). Table key must match actual addon name.
 	
 	Adding additional (unused) addons here does not impact BuffFilter performance:
 	Once the game is fully loaded, any addon which is not currently installed will
@@ -18,6 +18,15 @@ local BuffFilter = Apollo.GetAddon("BuffFilter")
 	identified by fDiscoverBar. If you use the stock "BuffContainerWindow" controls, just use
 	fFilterBar = BuffFilter.FilterStockBar.
 --]]
+
+-- Registers all built-in supported addons
+function BuffFilter:RegisterSupportedAddons()
+	for strAddonName,tAddonDetails in pairs(BuffFilter:GetSupportedAddons()) do
+		BuffFilter:RegisterSupportedAddon(strAddonName, tAddonDetails)
+	end
+end
+
+-- Gets table of built-in supported addons
 function BuffFilter:GetSupportedAddons()
 	local eTargetTypes = BuffFilter.eTargetTypes
 	local eBuffTypes = BuffFilter.eBuffTypes
@@ -25,11 +34,6 @@ function BuffFilter:GetSupportedAddons()
 	return {
 		-- Stock UI
 		["TargetFrame"] = {
-			fDiscoverBar =
-				function(addon, strTargetType, strBuffType)
-					return addon[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaUnitFrame",
 				[eTargetTypes.Target] = "luaTargetFrame",
@@ -39,15 +43,14 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "BeneBuffBar",
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
+			fDiscoverBar =
+				function(addon, strTargetType, strBuffType)
+					return addon[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
+				end,
 		},
 		
 		-- Potato UI 2.8+
 		["PotatoBuffs"] = {
-			fDiscoverBar =
-				function(addon, strTargetType, strBuffType)
-					return addon[strTargetType .. strBuffType].wndBuffs:FindChild("Buffs")
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaPlayer",
 				[eTargetTypes.Target] = "luaTarget",
@@ -58,14 +61,13 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "Buffs",
 				[eBuffTypes.Debuff] = "Debuffs"
 			},
+			fDiscoverBar =
+				function(addon, strTargetType, strBuffType)
+					return addon[strTargetType .. strBuffType].wndBuffs:FindChild("Buffs")
+				end,
 		},		
 		
 		["SimpleBuffBar"] = {
-			fDiscoverBar =
-				function(addon, strTargetType, strBuffType)
-					return addon.bars[strTargetType .. strBuffType]
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "Player",
 				[eTargetTypes.Target] = "Target",
@@ -75,14 +77,13 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "BuffBar",
 				[eBuffTypes.Debuff] = "DebuffBar"
 			},
+			fDiscoverBar =
+				function(addon, strTargetType, strBuffType)
+					return addon.bars[strTargetType .. strBuffType]
+				end,
 		},
 		
 		["VikingUnitFrames"] = {
-			fDiscoverBar =
-				function(addon, strTargetType, strBuffType)
-					return addon[strTargetType].wndUnitFrame:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "tPlayerFrame",
 				[eTargetTypes.Target] = "tTargetFrame",
@@ -93,14 +94,13 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "Good",
 				[eBuffTypes.Debuff] = "Bad"
 			},		
+			fDiscoverBar =
+				function(addon, strTargetType, strBuffType)
+					return addon[strTargetType].wndUnitFrame:FindChild(strBuffType)
+				end,
 		},
 		
 		["FastTargetFrame"] = {
-			fDiscoverBar =
-				function(addon, strTargetType, strBuffType)
-					return addon[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "luaUnitFrame",
 				[eTargetTypes.Target] = "luaTargetFrame",
@@ -110,14 +110,13 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "BeneBuffBar",
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
+			fDiscoverBar =
+				function(addon, strTargetType, strBuffType)
+					return addon[strTargetType].wndMainClusterFrame:FindChild(strBuffType)
+				end,
 		},
 
 		["KuronaFrames"] = {
-			fDiscoverBar =
-				function(addon, strTargetType, strBuffType)
-					return addon[strTargetType]:FindChild(strBuffType)
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "playerFrame",
 				[eTargetTypes.Target] = "targetFrame",
@@ -127,14 +126,13 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "BeneBuffBar",
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
-		},
-		
-		["AlterFrame"] = {
 			fDiscoverBar =
 				function(addon, strTargetType, strBuffType)
 					return addon[strTargetType]:FindChild(strBuffType)
 				end,
-			fFilterBar = BuffFilter.FilterStockBar,
+		},
+		
+		["AlterFrame"] = {
 			tTargetType = {
 				[eTargetTypes.Player] = "wndMain",
 				[eTargetTypes.Target] = "wndTarget",
@@ -144,14 +142,13 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "BeneBuffBar",
 				[eBuffTypes.Debuff] = "HarmBuffBar"
 			},
-		},
-		
-		["CandyUI_UnitFrames"] = {
 			fDiscoverBar =
 				function(addon, strTargetType, strBuffType)
 					return addon[strTargetType]:FindChild(strBuffType)
 				end,
-			fFilterBar = BuffFilter.FilterStockBar,
+		},
+		
+		["CandyUI_UnitFrames"] = {
 			tTargetType = {
 				[eTargetTypes.Player] = "wndPlayerUF",
 				[eTargetTypes.Target] = "wndTargetUF",
@@ -162,14 +159,13 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "BuffContainerWindow",
 				[eBuffTypes.Debuff] = "DebuffContainerWindow"
 			},
+			fDiscoverBar =
+				function(addon, strTargetType, strBuffType)
+					return addon[strTargetType]:FindChild(strBuffType)
+				end,
 		},
 		
 		["ForgeUI_UnitFrames"] = {
-			fDiscoverBar =
-				function(addon, strTargetType, strBuffType)
-					return addon[strTargetType .. strBuffType]
-				end,
-			fFilterBar = BuffFilter.FilterStockBar,
 			tTargetType = {
 				[eTargetTypes.Player] = "wndPlayer",
 				[eTargetTypes.Target] = "wndTarget",
@@ -179,6 +175,10 @@ function BuffFilter:GetSupportedAddons()
 				[eBuffTypes.Buff] = "BuffFrame",
 				[eBuffTypes.Debuff] = "DebuffFrame"
 			},
+			fDiscoverBar =
+				function(addon, strTargetType, strBuffType)
+					return addon[strTargetType .. strBuffType]
+				end,
 		},		
 	}
 end
