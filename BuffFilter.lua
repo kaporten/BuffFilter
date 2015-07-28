@@ -5,7 +5,7 @@
 require "Apollo"
 require "Window"
 
-local Major, Minor, Patch = 6, 0, 0
+local Major, Minor, Patch = 6, 1, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -564,7 +564,8 @@ function BuffFilter:OnSave(eType)
 	end
 	
 	local tSaveData = {}
-	tSaveData.tKnownBuffs = BuffFilter.tBuffsById -- easy-save, dump buff-by-id struct
+
+	tSaveData.tKnownBuffs = self:PruneBuffs(BuffFilter.tBuffsById) -- Only save buffs with config
 	tSaveData.nTimerDelay = self.tSettings.nTimerDelay
 	tSaveData.nTimerCooldown = self.tSettings.nTimerCooldown
 	tSaveData.bOnlyHideInCombat = self.tSettings.bOnlyHideInCombat
@@ -572,6 +573,27 @@ function BuffFilter:OnSave(eType)
 	tSaveData.bInverseFiltering = self.tSettings.bInverseFiltering
 	
 	return tSaveData	
+end
+
+function BuffFilter:PruneBuffs(tBuffs)
+	-- Amnesia light: prune buffs that have no configuration from settings
+	local tBuffsWithConfiguration = {}
+	for id,tBuffDetails in pairs(tBuffs) do
+		local bHasPriority = tBuffDetails.nPriority ~= nil and tBuffDetails.nPriority ~= ePriority.Unset
+		local bHasHideFlag = false
+		if tBuffDetails.tHideFlags ~= nil then
+			for _,flag in pairs(tBuffDetails.tHideFlags) do
+				if flag == true then					
+					bHasHideFlag = true
+				end
+			end
+		end
+		
+		if bHasPriority or bHasHideFlag then
+			tBuffsWithConfiguration[id] = tBuffDetails
+		end
+	end
+	return tBuffsWithConfiguration
 end
 
 -- Restore addon config per character. Called by engine when loading UI.
