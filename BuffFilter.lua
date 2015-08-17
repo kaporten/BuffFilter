@@ -5,7 +5,7 @@
 require "Apollo"
 require "Window"
 
-local Major, Minor, Patch = 6, 1, 0
+local Major, Minor, Patch = 6, 2, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -566,11 +566,14 @@ function BuffFilter:OnSave(eType)
 	local tSaveData = {}
 
 	tSaveData.tKnownBuffs = self:PruneBuffs(BuffFilter.tBuffsById) -- Only save buffs with config
+	tSaveData.nTimerScan = self.tSettings.nTimerScan
 	tSaveData.nTimerDelay = self.tSettings.nTimerDelay
 	tSaveData.nTimerCooldown = self.tSettings.nTimerCooldown
 	tSaveData.bOnlyHideInCombat = self.tSettings.bOnlyHideInCombat
 	tSaveData.bEnableSorting = self.tSettings.bEnableSorting
 	tSaveData.bInverseFiltering = self.tSettings.bInverseFiltering
+	tSaveData.bFilterTriggerTimer = self.tSettings.bFilterTriggerTimer
+	tSaveData.bFilterTriggerEvent = self.tSettings.bFilterTriggerEvent
 	
 	return tSaveData	
 end
@@ -612,6 +615,10 @@ function BuffFilter:SetDefaultValues()
 	self.tSettings = {}
 	self.tSettings.nTimerDelay = 0
 	self.tSettings.nTimerCooldown = 1000
+	self.tSettings.nTimerScan = 5000
+	
+	self.tSettings.bFilterTriggerEvent = true
+	self.tSettings.bFilterTriggerTimer = false
 	
 	-- Various config options
 	self.tSettings.bOnlyHideInCombat = false	
@@ -626,13 +633,38 @@ end
 
 -- Called after restoring saved data. Updates all GUI elements.
 function BuffFilter:UpdateSettingsGUI()
-	-- Update timer value and labels
+	-- Update sliders
+	self.wndSettings:FindChild("ScanSlider"):SetValue(self.tSettings.nTimerScan)
+	self.wndSettings:FindChild("ScanSliderLabel"):SetText(string.format("Scanner timer (%.2fs):", self.tSettings.nTimerScan/1000))	
+	
 	self.wndSettings:FindChild("DelaySlider"):SetValue(self.tSettings.nTimerDelay)
 	self.wndSettings:FindChild("DelaySliderLabel"):SetText(string.format("Event filter-delay (%.2fs):", self.tSettings.nTimerDelay/1000))	
-
+	
 	self.wndSettings:FindChild("CooldownSlider"):SetValue(self.tSettings.nTimerCooldown)
 	self.wndSettings:FindChild("CooldownSliderLabel"):SetText(string.format("Filtering cooldown (%.2fs):", self.tSettings.nTimerCooldown/1000))	
 	
+	-- Trigger category enablers
+	self.wndSettings:FindChild("FilterTriggerEventButton"):SetCheck(self.tSettings.bFilterTriggerEvent)
+	self.wndSettings:FindChild("FilterTriggerTimerButton"):SetCheck(self.tSettings.bFilterTriggerTimer)
+	
+	-- Enable or disable all elements in the trigger-subgroups depending on enable-flag	
+	--[[
+	self.wndSettings:FindChild("ScanSlider"):Enable(self.tSettings.bFilterTriggerTimer)
+	self.wndSettings:FindChild("DelaySlider"):Enable(self.tSettings.bFilterTriggerEvent)
+	self.wndSettings:FindChild("CooldownSlider"):Enable(self.tSettings.bFilterTriggerEvent)
+	--]]
+	---[[
+	for _,wndChild in pairs(self.wndSettings:FindChild("EventSubGroup"):GetChildren()) do
+		wndChild:Enable(self.tSettings.bFilterTriggerEvent)
+		wndChild:SetOpacity(self.tSettings.bFilterTriggerEvent and 1 or 0.3)
+	end
+	for _,wndChild in pairs(self.wndSettings:FindChild("TimerSubGroup"):GetChildren()) do
+		wndChild:Enable(self.tSettings.bFilterTriggerTimer)
+		wndChild:SetOpacity(self.tSettings.bFilterTriggerTimer and 1 or 0.3)
+	end	
+	--]]
+	
+	-- Checkboxes
 	self.wndSettings:FindChild("InCombatBtn"):SetCheck(self.tSettings.bOnlyHideInCombat)
 	self.wndSettings:FindChild("InverseBuffsBtn"):SetCheck(self.tSettings.bInverseFiltering[eBuffTypes.Buff])
 	self.wndSettings:FindChild("InverseDebuffsBtn"):SetCheck(self.tSettings.bInverseFiltering[eBuffTypes.Debuff])
@@ -672,9 +704,24 @@ function BuffFilter:RestoreSaveData()
 		BuffFilter.tSettings.nTimerCooldown = BuffFilter.tSavedData.nTimerCooldown
 	end
 	
+	-- Scanner timer setting
+	if type(BuffFilter.tSavedData.nTimerScan) == "number" then
+		BuffFilter.tSettings.nTimerScan = BuffFilter.tSavedData.nTimerScan
+	end
+
+	-- Event-trigger
+	if type(BuffFilter.tSavedData.bFilterTriggerEvent) == "boolean" then
+		BuffFilter.tSettings.bFilterTriggerEvent = BuffFilter.tSavedData.bFilterTriggerEvent
+	end	
+	
+	-- Timer-trigger
+	if type(BuffFilter.tSavedData.bFilterTriggerTimer) == "boolean" then
+		BuffFilter.tSettings.bFilterTriggerTimer = BuffFilter.tSavedData.bFilterTriggerTimer
+	end	
+	
 	-- Only hide in combat flag
 	if type(BuffFilter.tSavedData.bOnlyHideInCombat) == "boolean" then
-		BuffFilter.tSettings.bOnlyHideInCombat =  BuffFilter.tSavedData.bOnlyHideInCombat
+		BuffFilter.tSettings.bOnlyHideInCombat = BuffFilter.tSavedData.bOnlyHideInCombat
 	end	
 
 	-- Enable sorting flag
@@ -860,6 +907,24 @@ function BuffFilter:OnGridSelChange(wndControl, wndHandler, nRow, nColumn)
 	
 	-- Force update
 	BuffFilter:Filter()
+end
+
+function BuffFilter:OnButtonCheck_FilteringTriggerEvent(wndHandler, wndControl, eMouseButton)
+	self.tSettings.bFilterTriggerEvent = wndControl:IsChecked()
+	self.tSettings.bFilterTriggerTimer = not wndControl:IsChecked()
+	self:UpdateSettingsGUI()
+end
+
+function BuffFilter:OnButtonCheck_FilteringTriggerTimer(wndHandler, wndControl, eMouseButton)
+	self.tSettings.bFilterTriggerTimer = wndControl:IsChecked()
+	self.tSettings.bFilterTriggerEvent = not wndControl:IsChecked()
+	self:UpdateSettingsGUI()
+end
+
+
+function BuffFilter:OnScanTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
+	self.tSettings.nTimerScan = fNewValue
+	self.wndSettings:FindChild("ScanSliderLabel"):SetText(string.format("Scanner timer (%.2fs):", self.tSettings.nTimerScan/1000))
 end
 
 function BuffFilter:OnDelayTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
