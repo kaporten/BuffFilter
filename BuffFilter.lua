@@ -175,6 +175,8 @@ function BuffFilter:OnDocLoaded()
 	-- Interface list loaded (so addon-button can be added
 	Apollo.RegisterEventHandler("InterfaceMenuListHasLoaded", "OnInterfaceMenuListHasLoaded", self)
 	
+	self:UpdateScheduledTimer()
+	
 	self:StartInitialTimer()
 end
 
@@ -912,12 +914,14 @@ end
 function BuffFilter:OnButtonCheck_FilteringTriggerEvent(wndHandler, wndControl, eMouseButton)
 	self.tSettings.bFilterTriggerEvent = wndControl:IsChecked()
 	self.tSettings.bFilterTriggerTimer = not wndControl:IsChecked()
+	self:UpdateScheduledTimer()
 	self:UpdateSettingsGUI()
 end
 
 function BuffFilter:OnButtonCheck_FilteringTriggerTimer(wndHandler, wndControl, eMouseButton)
 	self.tSettings.bFilterTriggerTimer = wndControl:IsChecked()
 	self.tSettings.bFilterTriggerEvent = not wndControl:IsChecked()
+	self:UpdateScheduledTimer()
 	self:UpdateSettingsGUI()
 end
 
@@ -925,6 +929,7 @@ end
 function BuffFilter:OnScanTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
 	self.tSettings.nTimerScan = fNewValue
 	self.wndSettings:FindChild("ScanSliderLabel"):SetText(string.format("Scanner timer (%.2fs):", self.tSettings.nTimerScan/1000))
+	self:UpdateScheduledTimer()
 end
 
 function BuffFilter:OnDelayTimerIntervalChange(wndHandler, wndControl, fNewValue, fOldValue)
@@ -1003,6 +1008,23 @@ function BuffFilter:OnChangeWorld()
 	-- World change, schedule a few bonus-updates to ensure fresh buff state is updated (hard to tell when UI is fully loaded)
 	self:StartInitialTimer()
 end
+
+function BuffFilter:UpdateScheduledTimer()
+	if self.tSettings.bFilterTriggerTimer == true then
+		self:StopScheduledTimer()			
+		self.timerScheduled = ApolloTimer.Create(self.tSettings.nTimerScan/1000, true, "ExecuteScheduledFilter", self)
+	else
+		self:StopScheduledTimer()
+	end	
+end
+
+function BuffFilter:StopScheduledTimer()
+	if self.timerScheduled ~= nil then
+		self.timerScheduled:Stop()
+		self.timerScheduled = nil
+	end
+end
+
 
 -- When BF surrounding environment changes, fire up some timers at escalating intervals (initially fast, then slower)
 -- This is used to handle initial filters after unknown load-times, world changes, etc.
@@ -1135,11 +1157,16 @@ function BuffFilter:OnResetButton(wndHandler, wndControl, eMouseButton)
 	self.tBuffsByTooltip = {}
 	self:SetDefaultValues()
 	self.wndSettings:FindChild("Grid"):DeleteAll()
+	self:UpdateScheduledTimer()
 	self:UpdateSettingsGUI()
 end
 
 -- Schedule an update whenever a buff is added to the player, target, focus or tot unit
 function BuffFilter:OnBuffAdded(unit, tBuff)
+	if self.tSettings.bFilterTriggerEvent ~= true
+		then return
+	end
+
 	if unit ~= nil then
 		local playerUnit = GameLib.GetPlayerUnit()
 		if unit == playerUnit then
