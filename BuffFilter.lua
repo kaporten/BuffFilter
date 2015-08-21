@@ -170,7 +170,10 @@ function BuffFilter:OnDocLoaded()
 	Apollo.RegisterEventHandler("AlternateTargetUnitChanged", "OnTargetUnitChanged", self) -- when changing focus
 	
 	-- New Buff update events
-	Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
+	if self.tSettings.bFilterTriggerEvent == true then	
+		Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
+		self.bOnBuffAddedRegistered = true
+	end	
 	
 	-- Interface list loaded (so addon-button can be added
 	Apollo.RegisterEventHandler("InterfaceMenuListHasLoaded", "OnInterfaceMenuListHasLoaded", self)
@@ -914,6 +917,13 @@ end
 function BuffFilter:OnButtonCheck_FilteringTriggerEvent(wndHandler, wndControl, eMouseButton)
 	self.tSettings.bFilterTriggerEvent = wndControl:IsChecked()
 	self.tSettings.bFilterTriggerTimer = not wndControl:IsChecked()
+	
+	-- New Buff update events
+	if self.tSettings.bFilterTriggerEvent == true and self.bOnBuffAddedRegistered ~= true then	
+		Apollo.RegisterEventHandler("BuffAdded", "OnBuffAdded", self)
+		self.bOnBuffAddedRegistered = true
+	end	
+	
 	self:UpdateScheduledTimer()
 	self:UpdateSettingsGUI()
 end
