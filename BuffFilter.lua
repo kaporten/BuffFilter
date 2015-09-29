@@ -5,7 +5,7 @@
 require "Apollo"
 require "Window"
 
-local Major, Minor, Patch = 6, 3, 0
+local Major, Minor, Patch = 6, 4, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
@@ -155,9 +155,6 @@ function BuffFilter:OnDocLoaded()
 	-- Update GUI with current values
 	self:UpdateSettingsGUI()
 					
-	-- Hook into tooltip generation
-	BuffFilter:HookBuffTooltipGeneration()
-	
 	-- Register slash command to display settings
 	Apollo.RegisterSlashCommand("bf", "OnConfigure", self)
 	Apollo.RegisterSlashCommand("bufffilter", "OnConfigure", self)
@@ -204,9 +201,15 @@ end
 -- Hack to combine spellId/details with the tooltip, since only half of each 
 -- data set is available on the PlayerUnit:GetBuffs() vs GUI buff container
 function BuffFilter:HookBuffTooltipGeneration()
+
+	-- Only hook once
+	if BuffFilter.bGetBuffTooltipFormHooked == true then
+		return
+	end
+	
 	-- Tooltip basic code hooking lifted from addon Generalist. Super addon, super idea :)
 	local origGetBuffTooltipForm = Tooltip.GetBuffTooltipForm
-	Tooltip.GetBuffTooltipForm = function(luaCaller, wndParent, splSource, tFlags)			
+	Tooltip.GetBuffTooltipForm = function(luaCaller, wndParent, splSource, tFlags)
 		-- Let original function produce tooltip window
 		local wndTooltip = origGetBuffTooltipForm(luaCaller, wndParent, splSource, tFlags)
 		 
@@ -214,6 +217,7 @@ function BuffFilter:HookBuffTooltipGeneration()
 		-- NB: At this point in time, wndParent actually targets the icon-to-hide. 
 		-- But using this ref would mean relying on the user to mouse-over the tooltip 
 		-- every time it should be hidden. So, better to re-scan and tooltip-match later.
+		
 		BuffFilter:RegisterBuff(
 			splSource:GetBaseSpellId(),
 			splSource:GetName(),	
@@ -231,6 +235,8 @@ function BuffFilter:HookBuffTooltipGeneration()
 		-- Return generated tooltip to client addon
 		return wndTooltip
 	end
+	
+	BuffFilter.bGetBuffTooltipFormHooked = true
 end
 
 function BuffFilter:OnDependencyError()
@@ -438,7 +444,6 @@ end
 
 -- Register buffs either by reading from addon savedata file, or from tooltip mouseovers
 function BuffFilter:RegisterBuff(nBaseSpellId, strName, strTooltip, strIcon, bIsBeneficial, tHideFlags, nPriority)
-	
 	-- Check if the buff to register is already known
 	local bKnownBuff = BuffFilter.tBuffsById[nBaseSpellId] ~= nil
 	
@@ -682,7 +687,7 @@ function BuffFilter:RestoreSaveData()
 	-- Assume OnRestore has placed actual save-data in BuffFilter.tSavedData. Abort restore if no data is found.
 	-- NB: RestoreSaveData is pcall'ed with no self context, so use BuffFilter global rather than self
 	if BuffFilter.tSavedData == nil or type(BuffFilter.tSavedData) ~= "table" then
-		Print("No saved BuffFilter configuration found. First run?")
+		Print("No saved BuffFilter configuration found. If this is your first time using BuffFilter, access settings via command '/bf'")
 		return
 	end
 	
@@ -813,6 +818,8 @@ function BuffFilter:OnToggleBuffFilter()
 end
 
 function BuffFilter:OnConfigure()
+	BuffFilter:HookBuffTooltipGeneration()
+	
 	-- Sort buffs before showing settings, but only if not already sorted (allow preservation of other sorting)
 	if self.wndSettings:FindChild("Grid"):GetSortColumn() == nil then
 		self.wndSettings:FindChild("Grid"):SetSortColumn(3, true)
@@ -1078,7 +1085,7 @@ function BuffFilter:OnInitialTimer()
 	end
 end
 
-function BuffFilter:ScrubAddonList()
+function BuffFilter:ScrubAddonList()	
 	-- Scrub list of active addons, so that it only contains installed/loaded addons
 	self.tActiveAddons = {}
 	for strAddonName,tAddonDetails in pairs(self.tSupportedAddons) do		
