@@ -5,7 +5,7 @@
 require "Apollo"
 require "Window"
 
-local Major, Minor, Patch = 6, 4, 0
+local Major, Minor, Patch = 6, 5, 0
 local BuffFilter = {}
 
 -- Enums for target/bufftype combinations
