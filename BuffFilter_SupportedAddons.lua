@@ -169,11 +169,12 @@ function BuffFilter:GetSupportedAddons()
 			tTargetType = {
 				[eTargetTypes.Player] = "wndPlayer",
 				[eTargetTypes.Target] = "wndTarget",
-				[eTargetTypes.Focus] = "wndFocus"
+				[eTargetTypes.Focus] = "wndFocus",
+				[eTargetTypes.TargetOfTarget] = "wndToT"
 			},
 			tBuffType = {
-				[eBuffTypes.Buff] = "BuffFrame",
-				[eBuffTypes.Debuff] = "DebuffFrame"
+				[eBuffTypes.Buff] = "Buffs",
+				[eBuffTypes.Debuff] = "Debuffs"
 			},
 			fDiscoverBar =
 				function(addon, strTargetType, strBuffType)
